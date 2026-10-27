@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: cobra-memescope
+    runtime: node
+    plan: free
+    buildCommand: npm ci --prefix frontend && npm ci --prefix backend && npm --prefix frontend run build
+    startCommand: npm --prefix backend start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.18.0
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: GOLDRUSH_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

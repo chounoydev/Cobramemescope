@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cobra MemeScope</string>
+    <string name="title_activity_main">Cobra MemeScope</string>
+    <string name="package_name">com.cobramemescope.app</string>
+    <string name="custom_url_scheme">com.cobramemescope.app</string>
+</resources>
