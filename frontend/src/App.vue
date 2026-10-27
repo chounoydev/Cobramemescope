@@ -1113,6 +1113,10 @@ onUnmounted(() => {
           <div class="scan-eyebrow"><span></span> MEMECOIN RESEARCH & MARKET SIGNALS</div>
           <h1 id="landing-intro-title">See the signal.<br /><em>Skip the guesswork.</em></h1>
           <p>MemeScope helps you explore new memecoins, follow cross-chain market activity, and review token and liquidity risk signals before making your own decision. Research tools are informative—not financial advice or a guarantee of safety.</p>
+          <aside class="landing-use-notice" aria-label="What MemeScope does and does not do">
+            <strong>Research and tracking—not an exchange</strong>
+            <p>MemeScope is an educational research tool for people new to memecoins and experienced traders alike. It does not accept deposits, buy or sell crypto, or hold your funds. Connect a wallet to view its SOL balance and detected memecoin holdings; your assets remain in your wallet. Any optional wallet transaction, such as a donation, must be initiated and approved by you in your wallet.</p>
+          </aside>
           <button type="button" class="landing-intro-action" @click="activePage = 'markets'">EXPLORE LIVE MARKETS <span aria-hidden="true">↗</span></button>
         </section>
 
@@ -1725,6 +1729,30 @@ onUnmounted(() => {
   color: rgba(193, 210, 215, 0.86);
   font-size: clamp(1rem, 1.5vw, 1.22rem);
   line-height: 1.7;
+}
+
+.landing-use-notice {
+  display: grid;
+  max-width: 900px;
+  gap: 7px;
+  padding: 14px 16px;
+  border: 1px solid rgba(122, 247, 179, 0.22);
+  border-left: 3px solid #7af7b3;
+  background: rgba(2, 15, 20, 0.5);
+}
+
+.landing-use-notice strong {
+  color: #a0ffcb;
+  font: 700 0.76rem 'DM Mono', monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.landing-use-notice p {
+  margin: 0;
+  color: rgba(193, 210, 215, 0.82);
+  font-size: 0.9rem;
+  line-height: 1.65;
 }
 
 .landing-intro-action {
