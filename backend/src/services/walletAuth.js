@@ -12,7 +12,7 @@ function decodeWalletAddress(address) {
   return Buffer.from(publicKey)
 }
 
-export function createWalletChallenge(address, origin, purpose = 'Sign in to MemeScope. No transaction will be sent.') {
+export function createWalletChallenge(address, origin, purpose = 'Sign in to Cobra MemeScope. No transaction will be sent.') {
   const publicKey = decodeWalletAddress(address)
   const walletAddress = bs58.encode(publicKey)
   const nonce = randomBytes(16).toString('hex')
@@ -42,7 +42,7 @@ export function createWalletChallenge(address, origin, purpose = 'Sign in to Mem
   return { nonce, message }
 }
 
-export function createEvmWalletChallenge(address, chainId, origin, purpose = 'Sign in to MemeScope. No transaction will be sent.') {
+export function createEvmWalletChallenge(address, chainId, origin, purpose = 'Sign in to Cobra MemeScope. No transaction will be sent.') {
   if (!/^0x[a-fA-F0-9]{40}$/.test(address)) throw new Error('Invalid EVM address.')
   if (!Number.isSafeInteger(chainId) || chainId < 1) throw new Error('Invalid EVM chain ID.')
   const walletAddress = address.toLowerCase()

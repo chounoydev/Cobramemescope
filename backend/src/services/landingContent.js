@@ -4,7 +4,7 @@ import { query } from '../db.js'
 const defaultEvents = [
   {
     badge: 'LIVE EVENT',
-    title: 'MemeScope Launch Night',
+    title: 'Cobra MemeScope Launch Night',
     description: 'Track the newest pairs, liquidity shifts, and risk signals before the next wave hits.',
     eventDate: 'Nov 14 · 6:30 PM',
     cta: 'Explore market pulse',

@@ -1,4 +1,4 @@
-cx1# MemeScope
+# Cobra MemeScope
 
 A memecoin risk scanner built with Vue 3, Vite, and Express. It combines third-party contract-security signals with live DEX market observations and a cross-chain feed of recent token profiles. The browser keeps watchlists locally.
 
@@ -91,7 +91,7 @@ The debug APK can be sideloaded for testing, but is not a Play Store release. Bu
 
 ## Notes
 
-- MemeScope is an educational memecoin research and tracking tool, not an exchange, broker, or custodian. It does not accept deposits, buy or sell crypto, or hold user funds. Connecting a wallet can show its SOL balance and detected token holdings; any optional wallet transaction, such as a donation, must be initiated and approved by the user.
+- Cobra MemeScope is an educational memecoin research and tracking tool, not an exchange, broker, or custodian. It does not accept deposits, buy or sell crypto, or hold user funds. Connecting a wallet can show its SOL balance and detected token holdings; any optional wallet transaction, such as a donation, must be initiated and approved by the user.
 - Market prices are informational and can be delayed. This app is not financial advice.
 - Market Tape ranks newly profiled pools created within the last 30 days using observed price movement, volume, activity, and liquidity. DexScreener profile listings are not proof of organic virality or a definitive meme-token classification; a listing may be promoted.
 - `GET /api/market/trending` merges recent profiles and latest/top boosted listings with per-chain GeckoTerminal new-pool discovery for Solana, Ethereum, Base, BNB Chain, Arbitrum, Sui, Polygon, and Avalanche. It returns up to 50 candidates, balancing discovery across chains and scanning additional candidates to replace explicit high-risk reviews when possible. Pools below $5,000 liquidity, below $1,000 24h volume, or at/below -20% 24h movement are excluded; the feed refreshes every 60 seconds and tags boosted listings. The list can contain fewer than 50 tokens when providers do not return enough qualifying pools. Sui market activity is screened, but its contract checks are marked unverified because the current risk providers do not support Sui. A review without detected issues is not a guarantee of safety. Feed candidates stay in the market list and are added to the browser's watchlist only when the user clicks the star; removing a token from the watchlist does not affect its market-feed visibility. A one-time browser migration clears legacy auto-tracked entries so only explicitly selected launches remain.

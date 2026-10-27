@@ -153,7 +153,7 @@ export default app
 
 if (process.env.VERCEL !== '1') {
   const port = Number(process.env.PORT) || 3001
-  const server = app.listen(port, () => console.log(`MemeScope API listening on http://localhost:${port}`))
+  const server = app.listen(port, () => console.log(`Cobra MemeScope API listening on http://localhost:${port}`))
   const accountDeletionInterval = setInterval(() => {
     if (!process.env.DATABASE_URL) return
     void processScheduledAccountDeletions().catch((error) => {

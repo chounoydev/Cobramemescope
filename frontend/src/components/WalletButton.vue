@@ -392,7 +392,7 @@ function readableError(error: unknown) {
   const code = (error as { code?: number })?.code
   if (code === 4001) return 'The request was declined. You can try again when ready.'
   if (error instanceof TypeError && /failed to fetch|network request failed/i.test(error.message)) {
-    return 'Could not reach the MemeScope API. Check that the backend is running and the API URL is correct, then try again.'
+    return 'Could not reach the Cobra MemeScope API. Check that the backend is running and the API URL is correct, then try again.'
   }
   if (error instanceof Error && error.message.trim()) return error.message
   return 'Could not sign in. Check your connection and try again.'
@@ -648,7 +648,7 @@ async function linkWalletToAccount(wallet: WalletOption) {
   trackingWalletMessage.value = ''
   errorMessage.value = ''
   try {
-    if (!wallet.provider) throw new Error(`${wallet.name} is not detected. Install or unlock it, then refresh MemeScope.`)
+    if (!wallet.provider) throw new Error(`${wallet.name} is not detected. Install or unlock it, then refresh Cobra MemeScope.`)
 
     if (wallet.walletType === 'evm') {
       if (!('request' in wallet.provider)) throw new Error(`${wallet.name} does not support EVM wallet connections.`)
@@ -734,7 +734,7 @@ async function connectSolana(provider: SolanaProvider, name: string) {
     if (!provider.signMessage) {
       if (name === 'Phantom' && isPhantomMobileEnvironment()) {
         if (sessionStorage.getItem(phantomBrowserHandoffKey)) {
-          throw new Error('Phantom did not enable message signing. Reload MemeScope in Phantom’s in-app browser and try again.')
+          throw new Error('Phantom did not enable message signing. Reload Cobra MemeScope in Phantom’s in-app browser and try again.')
         }
         startPhantomMobileConnection()
         return
@@ -1002,21 +1002,21 @@ function connectDetectedWallet(wallet: WalletOption) {
     }
     if (wallet.name === 'Phantom') {
       if (sessionStorage.getItem(phantomBrowserHandoffKey)) {
-        errorMessage.value = 'Phantom did not provide its Solana wallet. Reload MemeScope in Phantom’s in-app browser and try again.'
+        errorMessage.value = 'Phantom did not provide its Solana wallet. Reload Cobra MemeScope in Phantom’s in-app browser and try again.'
         return
       }
       if (isPhantomMobileEnvironment()) {
         startPhantomMobileConnection()
       } else {
-        errorMessage.value = 'Phantom extension not detected. Install or unlock Phantom in Chrome or Edge, then refresh MemeScope and try again.'
+        errorMessage.value = 'Phantom extension not detected. Install or unlock Phantom in Chrome or Edge, then refresh Cobra MemeScope and try again.'
       }
       return
     }
-    errorMessage.value = `${wallet.name} is not detected. Install or unlock the wallet extension, then refresh MemeScope and try again.`
+    errorMessage.value = `${wallet.name} is not detected. Install or unlock the wallet extension, then refresh Cobra MemeScope and try again.`
     return
   }
   if (!wallet.provider) {
-    errorMessage.value = `${wallet.name} is not detected. Install or unlock the wallet extension, then refresh MemeScope and try again.`
+    errorMessage.value = `${wallet.name} is not detected. Install or unlock the wallet extension, then refresh Cobra MemeScope and try again.`
     return
   }
   if ('request' in wallet.provider) void connectEvm(wallet.provider, wallet.name)
@@ -1094,7 +1094,7 @@ onBeforeUnmount(() => {
   <div v-if="dialogOpen" class="wallet-backdrop" @click.self="dialogOpen = false" @keydown.esc="dialogOpen = false">
     <section class="wallet-dialog" role="dialog" aria-modal="true" aria-labelledby="wallet-dialog-title">
       <header class="dialog-header">
-        <div><span class="dialog-eyebrow">{{ settingsMode ? 'ACCOUNT PREFERENCES' : profileSetup ? 'YOUR PROFILE' : 'MEMESCOPE ACCOUNT' }}</span><h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : emailMode === 'signup' ? 'Create your account' : 'Welcome back' }}</h2></div>
+        <div><span class="dialog-eyebrow">{{ settingsMode ? 'ACCOUNT PREFERENCES' : profileSetup ? 'YOUR PROFILE' : 'COBRA MEMESCOPE ACCOUNT' }}</span><h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : emailMode === 'signup' ? 'Create your account' : 'Welcome back' }}</h2></div>
         <div class="dialog-header-actions">
           <button v-if="settingsMode && !deletionScheduledAt" class="settings-back-button" type="button" @click="settingsMode = false">‹ Profile</button>
           <button v-if="address && !profileSetup" class="account-settings-button" type="button" aria-label="Account settings" title="Account settings" :aria-expanded="settingsMode" @click="openSettings"><Settings2 :size="17" :stroke-width="1.8" /></button>
@@ -1185,7 +1185,7 @@ onBeforeUnmount(() => {
               <span>{{ wallet.label }}<small>{{ trackingWalletSaving ? 'Waiting for wallet…' : `Connect ${wallet.walletType === 'solana' ? 'Solana' : 'EVM'} wallet` }}</small></span>
               <b>↗</b>
             </button>
-            <p v-if="!detectedWalletOptions.length" class="tracked-wallet-unavailable">No wallet detected. Install or unlock Phantom, MetaMask, or another supported wallet, then refresh MemeScope.</p>
+            <p v-if="!detectedWalletOptions.length" class="tracked-wallet-unavailable">No wallet detected. Install or unlock Phantom, MetaMask, or another supported wallet, then refresh Cobra MemeScope.</p>
             <button v-if="trackedWalletAddress" class="tracked-wallet-cancel" type="button" @click="linkWalletMode = false">Cancel</button>
           </div>
           <small v-if="trackingWalletMessage" class="tracking-wallet-status" role="status">{{ trackingWalletMessage }}</small>
@@ -1218,7 +1218,7 @@ onBeforeUnmount(() => {
             <input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Enter your password again" required />
           </template>
           <button class="email-submit" type="submit" :disabled="emailBusy">{{ emailBusy ? 'Please wait…' : emailMode === 'signup' ? 'Create account' : 'Sign in' }}</button>
-          <button class="email-mode" type="button" @click="emailMode = emailMode === 'signin' ? 'signup' : 'signin'">{{ emailMode === 'signin' ? 'New to MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
+          <button class="email-mode" type="button" @click="emailMode = emailMode === 'signin' ? 'signup' : 'signin'">{{ emailMode === 'signin' ? 'New to Cobra MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
         </form>
 
         <p class="account-note">Your email account and a connected crypto wallet are separate sign-in methods.</p>

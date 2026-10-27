@@ -52,7 +52,7 @@ function isActive(value: string) {
 
       <section class="owner-login-section" aria-labelledby="login-stats-title">
         <div class="owner-login-heading">
-          <h2 id="login-stats-title">People using MemeScope</h2>
+          <h2 id="login-stats-title">People using Cobra MemeScope</h2>
           <span>Unique wallet addresses or registered accounts</span>
         </div>
         <div v-if="dashboard.loginStats">

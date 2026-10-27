@@ -12,7 +12,7 @@ const errorMessage = ref('')
 const conversation = ref<AssistantMessage[]>([
   {
     role: 'model',
-    text: 'Hi, I’m Cobra Guide. I can help you use MemeScope, understand its features, and explain scan or market information. What would you like help with?',
+    text: 'Hi, I’m Cobra Guide. I can help you use Cobra MemeScope, understand its features, and explain scan or market information. What would you like help with?',
   },
 ])
 const conversationElement = ref<HTMLElement | null>(null)
@@ -25,7 +25,7 @@ const suggestedQuestions = [
 watch(() => props.authToken, () => {
   conversation.value = [{
     role: 'model',
-    text: 'Hi, I’m Cobra Guide. I can help you use MemeScope, understand its features, and explain scan or market information. What would you like help with?',
+    text: 'Hi, I’m Cobra Guide. I can help you use Cobra MemeScope, understand its features, and explain scan or market information. What would you like help with?',
   }]
   draft.value = ''
   errorMessage.value = ''
@@ -87,7 +87,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
     <section v-if="isOpen" class="assistant-panel" aria-label="Cobra Guide AI assistant">
       <header class="assistant-header">
         <div class="assistant-brand-icon"><Sparkles :size="17" /></div>
-        <div class="assistant-heading"><strong>Cobra Guide</strong><span>MEMESCOPE AI ASSISTANT</span></div>
+        <div class="assistant-heading"><strong>Cobra Guide</strong><span>COBRA MEMESCOPE AI ASSISTANT</span></div>
         <button class="assistant-close" type="button" aria-label="Close Cobra Guide" @click="isOpen = false"><X :size="18" /></button>
       </header>
 
@@ -115,7 +115,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
 
         <form class="assistant-composer" @submit.prevent="sendMessage()">
           <label class="visually-hidden" for="assistant-question">Ask Cobra Guide</label>
-          <textarea id="assistant-question" v-model="draft" rows="2" maxlength="1500" placeholder="Ask about MemeScope or a scan…" :disabled="loading" @keydown="handleComposerKeydown"></textarea>
+          <textarea id="assistant-question" v-model="draft" rows="2" maxlength="1500" placeholder="Ask about Cobra MemeScope or a scan…" :disabled="loading" @keydown="handleComposerKeydown"></textarea>
           <button type="submit" aria-label="Send question" :disabled="loading || !draft.trim()"><Send :size="17" /></button>
         </form>
         <p class="assistant-disclaimer">AI can be wrong. Scan results are indicators, not guarantees or financial advice.</p>

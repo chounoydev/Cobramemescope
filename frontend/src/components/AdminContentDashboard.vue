@@ -38,13 +38,13 @@ const imageInput = ref<HTMLInputElement | null>(null)
 const imageUploading = ref(false)
 const eventForm = reactive({ badge: '', title: '', description: '', eventDate: '', cta: '', imageUrl: '' })
 const themeOptions: { id: SeasonalTheme; label: string; description: string; icon: string }[] = [
-  { id: 'none', label: 'Default', description: 'Keep the standard MemeScope background.', icon: '◐' },
+  { id: 'none', label: 'Default', description: 'Keep the standard Cobra MemeScope background.', icon: '◐' },
   { id: 'christmas', label: 'Christmas · Santa Claus', description: 'A snowy Christmas village under the northern lights.', icon: '🎅' },
   { id: 'halloween', label: 'Halloween', description: 'A moonlit haunted-castle background with spooky accents.', icon: '🎃' },
   { id: 'new-year', label: 'New Year', description: 'Golden midnight fireworks and a celebratory skyline.', icon: '🎆' },
 ]
 const previewEvents: LandingEvent[] = [
-  { id: 'preview-launch-night', badge: 'LIVE EVENT', title: 'MemeScope Launch Night', description: 'Track the newest pairs, liquidity shifts, and risk signals before the next wave hits.', eventDate: 'Nov 14 · 6:30 PM', cta: 'Explore market pulse', imageUrl: '', displayOrder: 0 },
+  { id: 'preview-launch-night', badge: 'LIVE EVENT', title: 'Cobra MemeScope Launch Night', description: 'Track the newest pairs, liquidity shifts, and risk signals before the next wave hits.', eventDate: 'Nov 14 · 6:30 PM', cta: 'Explore market pulse', imageUrl: '', displayOrder: 0 },
   { id: 'preview-alpha-brief', badge: 'COMMUNITY DROP', title: 'Solana alpha brief', description: 'Fresh token screening, holder risk snapshots, and launch desk intel for active communities.', eventDate: 'Nov 18 · 8:00 PM', cta: 'Join the briefing', imageUrl: '', displayOrder: 1 },
   { id: 'preview-contract-review', badge: 'RISK REPORT', title: 'Contract review masterclass', description: 'Learn how to read holder concentration, creator controls, and live liquidity risk at a glance.', eventDate: 'Nov 21 · 4:00 PM', cta: 'See the event', imageUrl: '', displayOrder: 2 },
 ]

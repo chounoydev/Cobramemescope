@@ -55,7 +55,7 @@ const landingSlides = ref<LandingEvent[]>([
   {
     id: 'default-launch-night',
     badge: 'LIVE EVENT',
-    title: 'MemeScope Launch Night',
+    title: 'Cobra MemeScope Launch Night',
     description: 'Track the newest pairs, liquidity shifts, and risk signals before the next wave hits.',
     eventDate: 'Nov 14 · 6:30 PM',
     cta: 'Explore market pulse',
@@ -301,7 +301,7 @@ const visibleCoins = computed(() => {
 const marketCapTotal = computed(() => coins.value.reduce((total, coin) => total + coin.marketCap, 0))
 const marketVolumeTotal = computed(() => coins.value.reduce((total, coin) => total + coin.volume, 0))
 const pageHeading = computed(() => {
-  if (activePage.value === 'landing') return 'New & moving'
+  if (activePage.value === 'landing') return 'Home & announcement'
   if (activePage.value === 'scanner') return 'Analyze token'
   if (activePage.value === 'watchlist') return 'Your watchlist'
   return 'New & moving'
@@ -865,7 +865,7 @@ async function installMemeScopeApp() {
       ? 'In Safari, tap Share, then choose “Add to Home Screen.”'
       : isAndroidDevice
         ? 'In Chrome, open the ⋮ menu and choose “Install app” or “Add to Home screen.”'
-        : 'Use your browser’s install icon or menu to add MemeScope to your device.'
+        : 'Use your browser’s install icon or menu to add Cobra MemeScope to your device.'
     return
   }
 
@@ -952,7 +952,7 @@ onUnmounted(() => {
       </section>
       <section v-else class="admin-portal-gate">
         <div class="admin-portal-gate-mark">M<span>/</span></div>
-        <div class="admin-portal-label"><span></span> MEMESCOPE ACCESS CONTROL</div>
+        <div class="admin-portal-label"><span></span> COBRA MEMESCOPE ACCESS CONTROL</div>
         <h1>{{ walletSession ? 'Access not granted' : 'Private workspace' }}<em>.</em></h1>
         <p>{{ walletSession ? adminAccessError || 'This wallet is not on the owner or staff allowlist.' : 'Connect and sign in with an approved Solana wallet to continue to the admin dashboard.' }}</p>
         <button type="button" class="admin-portal-back" @click="navigateToPublicSite">RETURN TO PUBLIC SITE <span>↗</span></button>
@@ -1035,7 +1035,7 @@ onUnmounted(() => {
           <small>{{ chain.count }}</small>
         </div>
       </div>
-      <div class="scanner-sidebar-bottom"><span>READ THE SIGNALS</span><p>Risk indicators are snapshots, not guarantees. A clean scan cannot rule out a rug pull.</p><small>MEMESCOPE <b>·</b> 2026</small></div>
+      <div class="scanner-sidebar-bottom"><span>READ THE SIGNALS</span><p>Risk indicators are snapshots, not guarantees. A clean scan cannot rule out a rug pull.</p><small>COBRA MEMESCOPE <b>·</b> 2026</small></div>
     </aside>
 
     <main id="top" class="scanner-main home-page">
@@ -1083,11 +1083,11 @@ onUnmounted(() => {
         <section class="landing-announcements" aria-labelledby="landing-announcements-title">
           <header class="landing-announcements-header">
             <div>
-              <div class="scan-eyebrow"><span></span> MEMESCOPE UPDATES</div>
+              <div class="scan-eyebrow"><span></span> COBRA MEMESCOPE UPDATES</div>
               <h2 id="landing-announcements-title">Announcements<span>.</span></h2>
             </div>
           </header>
-          <div v-if="currentAnnouncement" class="announcement-carousel" aria-roledescription="carousel" aria-label="MemeScope announcements">
+          <div v-if="currentAnnouncement" class="announcement-carousel" aria-roledescription="carousel" aria-label="Cobra MemeScope announcements">
             <article :key="currentAnnouncement.id" class="landing-announcement-slide" aria-live="polite">
               <img v-if="currentAnnouncement.imageUrl" class="announcement-slide-image" :src="currentAnnouncement.imageUrl" :alt="`${currentAnnouncement.title} announcement`" />
               <div v-else class="announcement-slide-art" aria-hidden="true"><span>MS</span><i></i><b></b></div>
@@ -1099,34 +1099,34 @@ onUnmounted(() => {
                 <h3>{{ currentAnnouncement.title }}</h3>
                 <p>{{ currentAnnouncement.description }}</p>
                 <div class="announcement-slide-footer">
-                  <span>MEMESCOPE COMMUNITY UPDATE</span>
+                  <span>COBRA MEMESCOPE COMMUNITY UPDATE</span>
                 </div>
               </div>
               <span class="landing-announcement-number">{{ String((currentSlide % landingSlides.length) + 1).padStart(2, '0') }}</span>
             </article>
           </div>
           <p v-else class="announcement-empty">New announcements will appear here soon.</p>
-          <p class="announcement-caption">Events, product news, and community updates from MemeScope.</p>
+          <p class="announcement-caption">Events, product news, and community updates from Cobra MemeScope.</p>
         </section>
 
         <section class="landing-intro" aria-labelledby="landing-intro-title">
           <div class="scan-eyebrow"><span></span> MEMECOIN RESEARCH & MARKET SIGNALS</div>
           <h1 id="landing-intro-title">See the signal.<br /><em>Skip the guesswork.</em></h1>
-          <p>MemeScope helps you explore new memecoins, follow cross-chain market activity, and review token and liquidity risk signals before making your own decision. Research tools are informative—not financial advice or a guarantee of safety.</p>
-          <aside class="landing-use-notice" aria-label="What MemeScope does and does not do">
+          <p>Cobra MemeScope helps you explore new memecoins, follow cross-chain market activity, and review token and liquidity risk signals before making your own decision. Research tools are informative—not financial advice or a guarantee of safety.</p>
+          <aside class="landing-use-notice" aria-label="What Cobra MemeScope does and does not do">
             <strong>Research and tracking—not an exchange</strong>
-            <p>MemeScope is an educational research tool for people new to memecoins and experienced traders alike. It does not accept deposits, buy or sell crypto, or hold your funds. Connect a wallet to view its SOL balance and detected memecoin holdings; your assets remain in your wallet. Any optional wallet transaction, such as a donation, must be initiated and approved by you in your wallet.</p>
+            <p>Cobra MemeScope is an educational research tool for people new to memecoins and experienced traders alike. It does not accept deposits, buy or sell crypto, or hold your funds. Connect a wallet to view its SOL balance and detected memecoin holdings; your assets remain in your wallet. Any optional wallet transaction, such as a donation, must be initiated and approved by you in your wallet.</p>
           </aside>
           <button type="button" class="landing-intro-action" @click="activePage = 'markets'">EXPLORE LIVE MARKETS <span aria-hidden="true">↗</span></button>
         </section>
 
         <section class="mobile-install-card" aria-labelledby="mobile-install-title">
           <div class="mobile-install-copy">
-            <div class="scan-eyebrow"><span></span> MEMESCOPE ON MOBILE</div>
+            <div class="scan-eyebrow"><span></span> COBRA MEMESCOPE ON MOBILE</div>
             <h2 id="mobile-install-title">Your risk desk, in your pocket.</h2>
-            <p>Install MemeScope on your phone for quick access from your home screen. No app-store download is needed.</p>
+            <p>Install Cobra MemeScope on your phone for quick access from your home screen. No app-store download is needed.</p>
             <button type="button" class="mobile-install-button" :disabled="isPwaInstalled" @click="installMemeScopeApp">
-              {{ isPwaInstalled ? 'MEMESCOPE IS INSTALLED' : 'INSTALL MEMESCOPE' }}
+              {{ isPwaInstalled ? 'COBRA MEMESCOPE IS INSTALLED' : 'INSTALL COBRA MEMESCOPE' }}
               <span aria-hidden="true">{{ isPwaInstalled ? '✓' : '↓' }}</span>
             </button>
             <p v-if="installMessage" class="mobile-install-message" role="status">{{ installMessage }}</p>
@@ -1251,7 +1251,7 @@ onUnmounted(() => {
         </template>
       </section>
 
-      <footer class="scanner-footer"><span>MEMESCOPE <b>/</b> ON-CHAIN RISK DESK</span><span>Independent signals. Always verify on-chain.</span></footer>
+      <footer class="scanner-footer"><span>COBRA MEMESCOPE <b>/</b> ON-CHAIN RISK DESK</span><span>Independent signals. Always verify on-chain.</span></footer>
     </main>
     <MarketCoinDetail :coin="selectedMarketCoin" @close="selectedMarketCoin = null" @scan="scanTrendingCoin" />
     <CoinMarketDetail :coin="selectedListedCoin" @close="selectedListedCoin = null" />

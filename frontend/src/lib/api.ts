@@ -227,7 +227,7 @@ export async function askMemeScopeAssistant(
     })
   } catch (error) {
     if (error instanceof TypeError) {
-      throw new Error('Could not reach the MemeScope API. Check that the backend is running and the API URL is correct.')
+      throw new Error('Could not reach the Cobra MemeScope API. Check that the backend is running and the API URL is correct.')
     }
     throw error
   }

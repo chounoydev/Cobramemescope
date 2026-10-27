@@ -285,14 +285,14 @@ router.post('/profile/tracked-wallet/challenge', requireEmailAuth, (request, res
         walletAddress,
         chainId,
         origin,
-        'Link this wallet to your MemeScope email account. No transaction will be sent.',
+        'Link this wallet to your Cobra MemeScope email account. No transaction will be sent.',
       ))
     }
     if (walletType === 'solana') {
       return response.json(createWalletChallenge(
         walletAddress,
         origin,
-        'Link this wallet to your MemeScope email account. No transaction will be sent.',
+        'Link this wallet to your Cobra MemeScope email account. No transaction will be sent.',
       ))
     }
     return response.status(400).json({ error: 'Choose a supported Solana or EVM wallet.' })
