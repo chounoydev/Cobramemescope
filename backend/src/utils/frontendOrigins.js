@@ -3,8 +3,23 @@ const configuredFrontendOrigins = (process.env.FRONTEND_ORIGIN || 'http://localh
   .map((origin) => origin.trim())
   .filter(Boolean)
 
+const vercelFrontendOrigins = [
+  process.env.VERCEL_URL,
+  process.env.VERCEL_BRANCH_URL,
+  process.env.VERCEL_PROJECT_PRODUCTION_URL,
+]
+  .filter(Boolean)
+  .map((hostname) => {
+    try {
+      return new URL(`https://${hostname}`).origin
+    } catch {
+      return null
+    }
+  })
+  .filter(Boolean)
+
 export function isAllowedFrontendOrigin(origin) {
-  if (configuredFrontendOrigins.includes(origin)) return true
+  if (configuredFrontendOrigins.includes(origin) || vercelFrontendOrigins.includes(origin)) return true
   if (process.env.RENDER_EXTERNAL_URL && origin === process.env.RENDER_EXTERNAL_URL) return true
   if (process.env.NODE_ENV === 'production') return false
 
