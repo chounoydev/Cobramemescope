@@ -51,6 +51,14 @@ app.get('/api/health', async (_request, response) => {
   }
 })
 app.get('/api/cron/account-deletions', async (request, response, next) => {
+  if (
+    process.env.VERCEL !== '1'
+    || !request.get('user-agent')?.startsWith('vercel-cron/')
+    || request.get('x-vercel-cron-schedule') !== '0 0 * * *'
+  ) {
+    return response.status(404).json({ error: 'Not found.' })
+  }
+
   const cronSecret = process.env.CRON_SECRET
   if (!cronSecret) {
     return response.status(503).json({ error: 'CRON_SECRET is not configured in the backend environment.' })

@@ -200,7 +200,15 @@ export type ContractScan = {
   checkedAt: string
 }
 
-const apiBaseUrl = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL?.trim() || '')
+const configuredApiBaseUrl = import.meta.env.VITE_API_URL?.trim() || ''
+const apiBaseIsLoopback = (() => {
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(configuredApiBaseUrl).hostname)
+  } catch {
+    return false
+  }
+})()
+const apiBaseUrl = import.meta.env.DEV || apiBaseIsLoopback ? '' : configuredApiBaseUrl
 
 export type AssistantMessage = { role: 'user' | 'model'; text: string }
 
