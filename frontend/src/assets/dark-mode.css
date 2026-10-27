@@ -2960,6 +2960,98 @@
   color: #f0c0b9;
 }
 
+:root.dark-mode .admin-users-section,
+:root.dark-mode .admin-ban-dialog {
+  border-color: #354136;
+  background: #19221b;
+  color: #e5ebdf;
+}
+
+:root.dark-mode .admin-user-search label,
+:root.dark-mode .admin-user-table td {
+  color: #b7c2b1;
+}
+
+:root.dark-mode .admin-user-search input,
+:root.dark-mode .admin-ban-dialog textarea {
+  border-color: #39483a;
+  background: #141c15;
+  color: #e5ebdf;
+}
+
+:root.dark-mode .admin-user-search input::placeholder,
+:root.dark-mode .admin-ban-dialog textarea::placeholder {
+  color: #84917f;
+}
+
+:root.dark-mode .admin-user-table th {
+  background: #202b21;
+  color: #a4b09f;
+}
+
+:root.dark-mode .admin-user-table td,
+:root.dark-mode .admin-user-pagination {
+  border-color: #303d31;
+}
+
+:root.dark-mode .admin-user-table td > strong {
+  color: #e5ebdf;
+}
+
+:root.dark-mode .admin-user-table td > small {
+  color: #9bab87;
+}
+
+:root.dark-mode .admin-user-table td > .admin-user-reason {
+  color: #f0a79d;
+}
+
+:root.dark-mode .admin-user-status.active {
+  background: #263a26;
+  color: #cde2b5;
+}
+
+:root.dark-mode .admin-user-status.banned {
+  background: #422725;
+  color: #f0b0a7;
+}
+
+:root.dark-mode .admin-user-action {
+  border-color: #39483a;
+  background: #202b21;
+  color: #dce8c8;
+}
+
+:root.dark-mode .admin-user-ban {
+  border-color: #68403a;
+  background: #34221f;
+  color: #f0c0b9;
+}
+
+:root.dark-mode .admin-user-unban {
+  border-color: #45583c;
+  background: #243322;
+  color: #cde2b5;
+}
+
+:root.dark-mode .admin-user-pagination {
+  color: #a4b09f;
+}
+
+:root.dark-mode .admin-ban-dialog h3 {
+  color: #e5ebdf;
+}
+
+:root.dark-mode .admin-ban-dialog p,
+:root.dark-mode .admin-ban-dialog label,
+:root.dark-mode .admin-ban-dialog > small {
+  color: #a4b09f;
+}
+
+:root.dark-mode .admin-ban-dialog > span {
+  color: #f0a79d;
+}
+
 :root.dark-mode .admin-primary {
   background: #b4cf7a;
   color: #172014;

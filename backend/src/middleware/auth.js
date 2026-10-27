@@ -29,7 +29,7 @@ async function authenticate(request, response, next, allowScheduledDeletion) {
 
   try {
     if (request.user.authType === 'wallet') {
-      const profile = await query('SELECT created_at, deletion_scheduled_at FROM user_profiles WHERE identity_key = $1', [request.user.id])
+      const profile = await query('SELECT created_at, deletion_scheduled_at, banned_at, ban_reason FROM user_profiles WHERE identity_key = $1', [request.user.id])
       const profileCreatedAt = Number(payload.profileCreatedAt)
       const issuedAt = Number(payload.iat) * 1000
       const storedCreatedAt = profile.rows[0] ? new Date(profile.rows[0].created_at).getTime() : NaN
@@ -39,14 +39,26 @@ async function authenticate(request, response, next, allowScheduledDeletion) {
       if (!profile.rows[0] || sessionIsStale) {
         return response.status(401).json({ error: 'This account was deleted or its session is no longer valid. Sign in again.' })
       }
+      if (profile.rows[0].banned_at) {
+        return response.status(403).json({ error: `This account is banned. Reason: ${profile.rows[0].ban_reason || 'No reason provided.'}` })
+      }
       if (profile.rows[0].deletion_scheduled_at && !allowScheduledDeletion) {
         return response.status(403).json({ error: 'This account is deactivated and scheduled for deletion. Cancel the deletion to restore access.' })
       }
     } else {
-      const account = await query('SELECT 1 FROM users WHERE id = $1', [request.user.id])
+      const account = await query(
+        `SELECT profiles.deletion_scheduled_at, profiles.banned_at, profiles.ban_reason
+         FROM users
+         LEFT JOIN user_profiles AS profiles ON profiles.identity_key = users.id::TEXT
+         WHERE users.id = $1`,
+        [request.user.id],
+      )
       if (!account.rowCount) return response.status(401).json({ error: 'This account was deleted. Create a new account to continue.' })
-      const profile = await query('SELECT deletion_scheduled_at FROM user_profiles WHERE identity_key = $1', [request.user.id])
-      if (profile.rows[0]?.deletion_scheduled_at && !allowScheduledDeletion) {
+      if (account.rows[0].banned_at) {
+        return response.status(403).json({ error: `This account is banned. Reason: ${account.rows[0].ban_reason || 'No reason provided.'}` })
+      }
+      const profile = account.rows[0]
+      if (profile.deletion_scheduled_at && !allowScheduledDeletion) {
         return response.status(403).json({ error: 'This account is deactivated and scheduled for deletion. Cancel the deletion to restore access.' })
       }
     }

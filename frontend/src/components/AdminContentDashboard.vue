@@ -2,14 +2,20 @@
 import { onMounted, reactive, ref } from 'vue'
 import {
   addStaffWallet,
+  banAdminUser,
   deleteLandingEvent,
   deleteStaffWallet,
   fetchAdminEvents,
+  fetchAdminInviteLeaderboard,
   fetchAdminStaff,
+  fetchAdminUsers,
   fetchSiteTheme,
   saveAdminEvent,
   saveAdminSiteTheme,
+  unbanAdminUser,
   uploadAdminEventImage,
+  type AdminUser,
+  type AdminInviteLeader,
   type LandingEvent,
   type SeasonalTheme,
   type StaffWallet,
@@ -17,10 +23,12 @@ import {
 
 const props = defineProps<{ token: string; role: 'owner' | 'staff' }>()
 const emit = defineEmits<{ 'theme-updated': [theme: SeasonalTheme] }>()
-type AdminContentSection = 'events' | 'appearance' | 'staff'
+type AdminContentSection = 'events' | 'appearance' | 'staff' | 'invites' | 'users'
 
 const events = ref<LandingEvent[]>([])
 const staff = ref<StaffWallet[]>([])
+const users = ref<AdminUser[]>([])
+const inviteLeaders = ref<AdminInviteLeader[]>([])
 const activeSection = ref<AdminContentSection>('events')
 const siteTheme = ref<SeasonalTheme>('new-year')
 const themeDraft = ref<SeasonalTheme>('new-year')
@@ -36,6 +44,22 @@ const themeNotice = ref('')
 const staffWallet = ref('')
 const imageInput = ref<HTMLInputElement | null>(null)
 const imageUploading = ref(false)
+const userSearch = ref('')
+const userOffset = ref(0)
+const userTotal = ref(0)
+const usersLoading = ref(false)
+const userError = ref('')
+const userNotice = ref('')
+const inviteSearch = ref('')
+const inviteOffset = ref(0)
+const inviteTotal = ref(0)
+const invitesLoading = ref(false)
+const inviteError = ref('')
+let inviteLoadSequence = 0
+const banTarget = ref<AdminUser | null>(null)
+const banReason = ref('')
+const userSaving = ref(false)
+let userLoadSequence = 0
 const eventForm = reactive({ badge: '', title: '', description: '', eventDate: '', cta: '', imageUrl: '' })
 const themeOptions: { id: SeasonalTheme; label: string; description: string; icon: string }[] = [
   { id: 'none', label: 'Default', description: 'Keep the standard Cobra MemeScope background.', icon: '◐' },
@@ -206,6 +230,116 @@ async function revokeStaffAccess(member: StaffWallet) {
   }
 }
 
+async function loadUsers(offset = 0) {
+  const sequence = ++userLoadSequence
+  usersLoading.value = true
+  userError.value = ''
+  userNotice.value = ''
+  try {
+    const result = await fetchAdminUsers(props.token, userSearch.value.trim(), 'all', offset)
+    if (sequence !== userLoadSequence) return
+    users.value = result.users
+    userTotal.value = result.total
+    userOffset.value = result.offset
+  } catch (cause) {
+    if (sequence !== userLoadSequence) return
+    userError.value = cause instanceof Error ? cause.message : 'Could not load user accounts.'
+  } finally {
+    if (sequence === userLoadSequence) usersLoading.value = false
+  }
+}
+
+async function loadInviteLeaderboard(offset = 0) {
+  const sequence = ++inviteLoadSequence
+  invitesLoading.value = true
+  inviteError.value = ''
+  try {
+    const result = await fetchAdminInviteLeaderboard(props.token, inviteSearch.value.trim(), offset)
+    if (sequence !== inviteLoadSequence) return
+    inviteLeaders.value = result.leaders
+    inviteTotal.value = result.total
+    inviteOffset.value = result.offset
+  } catch (cause) {
+    if (sequence !== inviteLoadSequence) return
+    inviteError.value = cause instanceof Error ? cause.message : 'Could not load the invite leaderboard.'
+  } finally {
+    if (sequence === inviteLoadSequence) invitesLoading.value = false
+  }
+}
+
+function openUserSection(section: 'users') {
+  activeSection.value = section
+  void loadUsers()
+}
+
+function openInviteSection() {
+  activeSection.value = 'invites'
+  void loadInviteLeaderboard()
+}
+
+function searchUsers() {
+  void loadUsers()
+}
+
+function searchInviteLeaders() {
+  void loadInviteLeaderboard()
+}
+
+function beginBan(user: AdminUser) {
+  banTarget.value = user
+  banReason.value = ''
+  userError.value = ''
+  userNotice.value = ''
+}
+
+async function banUser() {
+  const target = banTarget.value
+  const reason = banReason.value.trim()
+  if (!target || !reason || userSaving.value) return
+  userSaving.value = true
+  userError.value = ''
+  userNotice.value = ''
+  try {
+    const result = await banAdminUser(props.token, target.identityKey, reason)
+    const user = users.value.find((item) => item.identityKey === target.identityKey)
+    if (user) {
+      user.bannedAt = result.bannedAt
+      user.banReason = result.banReason
+    }
+    banTarget.value = null
+    banReason.value = ''
+    userNotice.value = `${target.username || target.email || 'User'} was banned.`
+  } catch (cause) {
+    userError.value = cause instanceof Error ? cause.message : 'Could not ban this user.'
+  } finally {
+    userSaving.value = false
+  }
+}
+
+async function unbanUser(user: AdminUser) {
+  if (userSaving.value || !window.confirm(`Unban ${user.username || user.email || user.identityKey}?`)) return
+  userSaving.value = true
+  userError.value = ''
+  userNotice.value = ''
+  try {
+    await unbanAdminUser(props.token, user.identityKey)
+    const currentUser = users.value.find((item) => item.identityKey === user.identityKey)
+    if (currentUser) {
+      currentUser.bannedAt = null
+      currentUser.banReason = null
+    }
+    userNotice.value = `${user.username || user.email || 'User'} was unbanned.`
+  } catch (cause) {
+    userError.value = cause instanceof Error ? cause.message : 'Could not unban this user.'
+  } finally {
+    userSaving.value = false
+  }
+}
+
+function formatCreatedAt(date: string) {
+  return new Date(date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 function shortAddress(address: string) {
   return `${address.slice(0, 7)}…${address.slice(-6)}`
 }
@@ -232,6 +366,8 @@ onMounted(() => { void loadDashboard() })
         <button type="button" :class="{ active: activeSection === 'events' }" :aria-current="activeSection === 'events' ? 'page' : undefined" @click="activeSection = 'events'"><span>01</span> Events & content</button>
         <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'appearance' }" :aria-current="activeSection === 'appearance' ? 'page' : undefined" @click="activeSection = 'appearance'"><span>02</span> Site appearance</button>
         <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'staff' }" :aria-current="activeSection === 'staff' ? 'page' : undefined" @click="activeSection = 'staff'"><span>03</span> Staff access</button>
+        <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'invites' }" :aria-current="activeSection === 'invites' ? 'page' : undefined" @click="openInviteSection"><span>04</span> Invite leaderboard</button>
+        <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'users' }" :aria-current="activeSection === 'users' ? 'page' : undefined" @click="openUserSection('users')"><span>05</span> User directory</button>
       </nav>
 
       <section v-if="activeSection === 'events'" class="admin-content-layout" aria-label="Landing page content">
@@ -297,6 +433,95 @@ onMounted(() => { void loadDashboard() })
         <form class="admin-staff-form" @submit.prevent="grantStaffAccess"><label for="staff-wallet">Solana wallet address</label><input id="staff-wallet" v-model="staffWallet" :disabled="!databaseReady" required spellcheck="false" placeholder="Paste a staff wallet address" /><button type="submit" class="admin-primary" :disabled="!databaseReady">GRANT EDITOR ACCESS</button></form>
         <div v-for="member in staff" :key="member.walletAddress" class="admin-staff-row"><code :title="member.walletAddress">{{ shortAddress(member.walletAddress) }}</code><small>EDITOR</small><button type="button" class="admin-row-actions admin-delete" :disabled="!databaseReady" @click="revokeStaffAccess(member)">REMOVE ACCESS</button></div>
       </section>
+
+      <section v-if="role === 'owner' && activeSection === 'invites'" class="admin-users-section" aria-labelledby="invite-leaderboard-title">
+        <div class="admin-section-head">
+          <div>
+            <span>DEVELOPER WALLET ONLY · REFERRAL ACTIVITY</span>
+            <h2 id="invite-leaderboard-title">Invite leaderboard <small>{{ inviteTotal }}</small></h2>
+          </div>
+          <button type="button" class="admin-primary" :disabled="invitesLoading" @click="loadInviteLeaderboard(inviteOffset)">{{ invitesLoading ? 'LOADING…' : 'REFRESH LIST' }}</button>
+        </div>
+        <p class="admin-staff-note">See which users brought in new accounts and how many signups each invite link generated. Only signups attributed to a valid invite link are counted.</p>
+        <form class="admin-user-search" role="search" @submit.prevent="searchInviteLeaders">
+          <label for="invite-search-input">Search inviters</label>
+          <input id="invite-search-input" v-model="inviteSearch" type="search" maxlength="100" placeholder="Enter a username, email, or wallet address" />
+          <button type="submit" class="admin-primary" :disabled="invitesLoading">{{ invitesLoading ? 'SEARCHING…' : 'SEARCH' }}</button>
+          <button v-if="inviteSearch" type="button" class="admin-cancel" :disabled="invitesLoading" @click="inviteSearch = ''; searchInviteLeaders()">CLEAR</button>
+        </form>
+        <p v-if="inviteError" class="admin-message admin-error" role="alert">{{ inviteError }}</p>
+        <div class="admin-user-table-wrap">
+          <table class="admin-user-table">
+            <thead><tr><th>Rank</th><th>Inviter</th><th>Account</th><th>Joined</th><th>Successful invites</th></tr></thead>
+            <tbody>
+              <tr v-for="(leader, index) in inviteLeaders" :key="leader.identityKey">
+                <td>#{{ inviteOffset + index + 1 }}</td>
+                <td><strong>{{ leader.username || '—' }}</strong></td>
+                <td><strong>{{ leader.email || 'Wallet account' }}</strong><small v-if="leader.authType === 'wallet'">{{ leader.identityKey }}</small><small v-else>EMAIL ACCOUNT</small></td>
+                <td>{{ formatCreatedAt(leader.createdAt) }}</td>
+                <td><strong>{{ leader.invitedCount }}</strong></td>
+              </tr>
+              <tr v-if="!invitesLoading && inviteLeaders.length === 0"><td colspan="5" class="admin-empty">{{ inviteSearch ? 'No inviters match this search.' : 'No attributed invite signups have been recorded yet.' }}</td></tr>
+              <tr v-if="invitesLoading && inviteLeaders.length === 0"><td colspan="5" class="admin-empty">Loading invite leaderboard…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-user-pagination">
+          <span>Showing {{ inviteTotal ? inviteOffset + 1 : 0 }}–{{ Math.min(inviteOffset + inviteLeaders.length, inviteTotal) }} of {{ inviteTotal }}</span>
+          <div><button type="button" class="admin-cancel" :disabled="invitesLoading || inviteOffset === 0" @click="loadInviteLeaderboard(Math.max(0, inviteOffset - 50))">PREVIOUS</button><button type="button" class="admin-cancel" :disabled="invitesLoading || inviteOffset + inviteLeaders.length >= inviteTotal" @click="loadInviteLeaderboard(inviteOffset + 50)">NEXT</button></div>
+        </div>
+      </section>
+
+      <section v-if="role === 'owner' && activeSection === 'users'" class="admin-users-section" aria-labelledby="users-title">
+        <div class="admin-section-head">
+          <div>
+            <span>DEVELOPER WALLET ONLY · PRIVATE ACCOUNT DATA</span>
+            <h2 id="users-title">User directory <small>{{ userTotal }}</small></h2>
+          </div>
+          <button type="button" class="admin-primary" :disabled="usersLoading" @click="loadUsers(userOffset)">{{ usersLoading ? 'LOADING…' : 'REFRESH LIST' }}</button>
+        </div>
+        <p class="admin-staff-note">Search by username, email, or wallet address. Ban actions require a recorded violation reason; banned users can be unbanned here.</p>
+        <form class="admin-user-search" role="search" @submit.prevent="searchUsers">
+          <label for="user-search-input">Search accounts</label>
+          <input id="user-search-input" v-model="userSearch" type="search" maxlength="100" placeholder="Enter a username, email, or wallet address" />
+          <button type="submit" class="admin-primary" :disabled="usersLoading">{{ usersLoading ? 'SEARCHING…' : 'SEARCH' }}</button>
+          <button v-if="userSearch" type="button" class="admin-cancel" :disabled="usersLoading" @click="userSearch = ''; searchUsers()">CLEAR</button>
+        </form>
+        <p v-if="userError" class="admin-message admin-error" role="alert">{{ userError }}</p>
+        <p v-else-if="userNotice" class="admin-message admin-notice" role="status">{{ userNotice }}</p>
+        <div class="admin-user-table-wrap">
+          <table class="admin-user-table">
+            <thead><tr><th>Account</th><th>Username</th><th>Joined</th><th>Invited</th><th>Status / violation</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr v-for="user in users" :key="user.identityKey">
+                <td><strong>{{ user.email || 'Wallet account' }}</strong><small v-if="user.authType === 'wallet'">{{ user.identityKey }}</small><small v-else>EMAIL ACCOUNT</small></td>
+                <td>{{ user.username || '—' }}</td>
+                <td>{{ formatCreatedAt(user.createdAt) }}</td>
+                <td>{{ user.invitedCount }}</td>
+                <td><span :class="['admin-user-status', user.bannedAt ? 'banned' : 'active']">{{ user.bannedAt ? 'BANNED' : 'ACTIVE' }}</span><small v-if="user.banReason" class="admin-user-reason">{{ user.banReason }}</small></td>
+                <td><button v-if="user.bannedAt" type="button" class="admin-user-action admin-user-unban" :disabled="userSaving" @click="unbanUser(user)">UNBAN</button><button v-else type="button" class="admin-user-action admin-user-ban" :disabled="userSaving" @click="beginBan(user)">BAN USER</button></td>
+              </tr>
+              <tr v-if="!usersLoading && users.length === 0"><td colspan="6" class="admin-empty">No user accounts match this search.</td></tr>
+              <tr v-if="usersLoading && users.length === 0"><td colspan="6" class="admin-empty">Loading user accounts…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-user-pagination">
+          <span>Showing {{ userTotal ? userOffset + 1 : 0 }}–{{ Math.min(userOffset + users.length, userTotal) }} of {{ userTotal }}</span>
+          <div><button type="button" class="admin-cancel" :disabled="usersLoading || userOffset === 0" @click="loadUsers(Math.max(0, userOffset - 50))">PREVIOUS</button><button type="button" class="admin-cancel" :disabled="usersLoading || userOffset + users.length >= userTotal" @click="loadUsers(userOffset + 50)">NEXT</button></div>
+        </div>
+        <div v-if="banTarget" class="admin-ban-backdrop" @click.self="banTarget = null">
+          <form class="admin-ban-dialog" aria-labelledby="ban-dialog-title" @submit.prevent="banUser">
+            <span>USER MODERATION</span>
+            <h3 id="ban-dialog-title">Ban {{ banTarget.username || banTarget.email || 'this account' }}?</h3>
+            <p>This account will lose access immediately. The violation reason will be shown to the user if they try to sign in.</p>
+            <label for="ban-reason">Violation reason</label>
+            <textarea id="ban-reason" v-model="banReason" maxlength="500" rows="4" required placeholder="Describe the policy violation (up to 500 characters)." />
+            <small>{{ banReason.trim().length }}/500 characters</small>
+            <div class="admin-ban-actions"><button type="button" class="admin-cancel" :disabled="userSaving" @click="banTarget = null">CANCEL</button><button type="submit" class="admin-user-action admin-user-ban" :disabled="userSaving || !banReason.trim()">{{ userSaving ? 'BANNING…' : 'CONFIRM BAN' }}</button></div>
+          </form>
+        </div>
+      </section>
     </template>
   </section>
 </template>
@@ -337,7 +562,8 @@ onMounted(() => { void loadDashboard() })
 .admin-theme-error { color: #9b4137; }
 .admin-theme-notice { color: #52713e; }
 .admin-content-page { max-width: 1160px; margin: 0 auto; padding: 37px 0 24px; }.admin-content-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding-bottom: 22px; border-bottom: 1px solid #d9ddd4; }.admin-content-eyebrow { display: flex; align-items: center; gap: 8px; color: #737c6f; font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: .9px; }.admin-content-eyebrow > span { width: 8px; height: 8px; border-radius: 50%; background: #d9ef6e; }.admin-content-eyebrow b { color: #adb3a8; font-weight: 400; }.admin-content-head h1 { margin-top: 12px; color: #20261e; font-family: Manrope, sans-serif; font-size: 34px; font-weight: 800; }.admin-content-head h1 em { color: #879744; font-style: normal; }.admin-content-head p { margin-top: 7px; color: #7d8579; font-size: 10px; }.admin-refresh { width: 32px; height: 32px; border: 1px solid #dce0d7; background: #fff; color: #606b5a; font-size: 17px; }.admin-content-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 16px; margin-top: 18px; align-items: start; }.admin-event-list,.admin-event-form,.admin-staff-section,.admin-theme-panel { min-width: 0; border: 1px solid #dce0d7; background: #fff; }.admin-section-head { display: flex; min-height: 64px; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border-bottom: 1px solid #e5e8e1; }.admin-section-head > div > span { color: #81897d; font-family: 'DM Mono', monospace; font-size: 7px; letter-spacing: .6px; }.admin-section-head h2 { margin-top: 4px; color: #30382e; font-family: Manrope, sans-serif; font-size: 14px; }.admin-section-head h2 small { margin-left: 5px; color: #828a7e; font: 9px 'DM Mono', monospace; }.admin-primary { min-height: 31px; padding: 0 10px; background: #273126; color: #f4f6ed; font: 8px 'DM Mono', monospace; }.admin-primary:hover { background: #394734; }.admin-primary:disabled { opacity: .6; }.admin-event-row { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 11px 13px; border-bottom: 1px solid #eef0eb; }.admin-event-row:last-of-type { border-bottom: 0; }.admin-event-row > img,.admin-event-placeholder { display: grid; width: 54px; height: 54px; place-items: center; background: #edf2df; color: #607149; object-fit: cover; font: 11px Manrope, sans-serif; }.admin-event-copy { display: grid; min-width: 0; gap: 4px; }.admin-event-copy > span { color: #81897d; font: 7px 'DM Mono', monospace; }.admin-event-copy > strong { overflow: hidden; color: #30382e; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }.admin-event-copy > small { display: -webkit-box; overflow: hidden; color: #828a7e; font-size: 8px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }.admin-row-actions { display: flex; gap: 5px; }.admin-row-actions button,.admin-cancel { min-height: 27px; padding: 0 7px; border: 1px solid #dce0d7; background: #fff; color: #56604f; font: 7px 'DM Mono', monospace; }.admin-row-actions .admin-delete,.admin-staff-row .admin-delete { color: #9b473d; }.admin-empty { padding: 24px 16px; color: #848b80; font-size: 9px; }.admin-event-form { display: grid; gap: 12px; padding-bottom: 14px; scroll-margin-top: 20px; }.admin-event-form > label,.admin-form-pair label { display: grid; gap: 5px; padding: 0 14px; color: #5d6757; font: 8px 'DM Mono', monospace; }.admin-event-form input,.admin-event-form textarea,.admin-staff-form input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #dce0d7; outline: 0; background: #fbfcf9; color: #313a2f; font: 10px 'DM Sans', sans-serif; }.admin-event-form textarea { resize: vertical; line-height: 1.5; }.admin-event-form input:focus,.admin-event-form textarea:focus,.admin-staff-form input:focus { border-color: #859743; box-shadow: 0 0 0 2px rgb(219 244 106 / 24%); }.admin-event-form label > small { color: #8a9186; font: 8px 'DM Sans', sans-serif; }.admin-form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }.admin-image-preview { width: calc(100% - 28px); max-height: 150px; justify-self: center; object-fit: cover; }.admin-save { margin: 0 14px; }.admin-message { display: grid; gap: 5px; margin-top: 12px; padding: 11px 13px; font-size: 9px; }.admin-error { border: 1px solid #e7c7c0; background: #fbefec; color: #813a31; }.admin-error span { color: #8d5149; }.admin-notice { border: 1px solid #d3dfc4; background: #f2f7e9; color: #526943; }.admin-loading { display: flex; align-items: center; gap: 10px; padding: 25px 0; color: #6f786a; font-size: 10px; }.admin-staff-section { margin-top: 16px; }.admin-staff-note { padding: 11px 14px 0; color: #7d8579; font-size: 9px; line-height: 1.5; }.admin-staff-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding: 12px 14px; }.admin-staff-form label { grid-column: 1 / -1; color: #5d6757; font: 8px 'DM Mono', monospace; }.admin-staff-form input { height: 33px; }.admin-staff-row { display: grid; grid-template-columns: minmax(0, 1fr) 60px auto; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid #eef0eb; }.admin-staff-row code { overflow: hidden; color: #56604f; font-size: 9px; text-overflow: ellipsis; }.admin-staff-row > small { color: #7d8579; font: 7px 'DM Mono', monospace; }.admin-staff-row .admin-row-actions { min-height: 27px; border: 1px solid #dce0d7; background: #fff; color: #9b473d; font: 7px 'DM Mono', monospace; }
+.admin-users-section { margin-top: 16px; border: 1px solid #dce0d7; background: #fff; }.admin-user-search { display: flex; align-items: end; gap: 8px; padding: 12px 14px; }.admin-user-search label { display: grid; flex: 1; gap: 5px; color: #5d6757; font: 8px 'DM Mono', monospace; }.admin-user-search input,.admin-ban-dialog textarea { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #dce0d7; outline: 0; background: #fbfcf9; color: #313a2f; font: 10px 'DM Sans', sans-serif; }.admin-user-search input:focus,.admin-ban-dialog textarea:focus { border-color: #859743; box-shadow: 0 0 0 2px rgb(219 244 106 / 24%); }.admin-user-table-wrap { overflow-x: auto; }.admin-user-table { width: 100%; min-width: 720px; border-collapse: collapse; text-align: left; }.admin-user-table th { padding: 9px 12px; background: #f5f7f2; color: #798273; font: 7px 'DM Mono', monospace; letter-spacing: .04em; text-transform: uppercase; }.admin-user-table td { padding: 11px 12px; border-top: 1px solid #eef0eb; color: #4a5444; font-size: 9px; vertical-align: top; }.admin-user-table td:first-child { max-width: 260px; }.admin-user-table td > strong,.admin-user-table td > small { display: block; overflow-wrap: anywhere; }.admin-user-table td > strong { color: #30382e; font-size: 9px; }.admin-user-table td > small { margin-top: 4px; color: #848b80; font: 7px 'DM Mono', monospace; }.admin-user-table .admin-empty { text-align: center; }.admin-user-status { display: inline-flex; padding: 4px 6px; border-radius: 20px; font: 7px 'DM Mono', monospace; }.admin-user-status.active { background: #edf4e5; color: #54713e; }.admin-user-status.banned { background: #f9e9e6; color: #9b473d; }.admin-user-table td > .admin-user-reason { max-width: 240px; color: #9b473d; font: 8px 'DM Sans', sans-serif; line-height: 1.4; }.admin-user-action { min-height: 28px; padding: 0 9px; border: 1px solid #dce0d7; background: #fff; font: 7px 'DM Mono', monospace; cursor: pointer; }.admin-user-action:disabled { cursor: wait; opacity: .6; }.admin-user-ban { border-color: #e3c2bd; background: #fbefec; color: #973f35; }.admin-user-unban { border-color: #d3dfc4; background: #f2f7e9; color: #526943; }.admin-user-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid #eef0eb; color: #7d8579; font-size: 8px; }.admin-user-pagination > div { display: flex; gap: 7px; }.admin-user-pagination button:disabled,.admin-ban-actions button:disabled { cursor: not-allowed; opacity: .5; }.admin-ban-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 16px; background: rgb(17 22 17 / 62%); }.admin-ban-dialog { display: grid; width: min(100%, 440px); gap: 10px; padding: 20px; border: 1px solid #dce0d7; background: #fff; box-shadow: 0 18px 60px rgb(0 0 0 / 24%); }.admin-ban-dialog > span { color: #9b473d; font: 8px 'DM Mono', monospace; letter-spacing: .08em; }.admin-ban-dialog h3 { color: #30382e; font: 700 18px Manrope, sans-serif; }.admin-ban-dialog p { color: #70796d; font-size: 10px; line-height: 1.5; }.admin-ban-dialog label { color: #5d6757; font: 8px 'DM Mono', monospace; }.admin-ban-dialog textarea { resize: vertical; }.admin-ban-dialog > small { color: #848b80; font-size: 8px; text-align: right; }.admin-ban-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 @media (max-width: 900px) { .admin-content-layout { grid-template-columns: 1fr; } }
-@media (max-width: 650px) { .admin-content-page { padding-top: 24px; }.admin-content-head h1 { font-size: 27px; }.admin-content-head p { max-width: 270px; line-height: 1.5; }.admin-event-row { grid-template-columns: 42px minmax(0, 1fr); }.admin-event-row > img,.admin-event-placeholder { width: 42px; height: 42px; }.admin-event-row .admin-row-actions { grid-column: 2; }.admin-form-pair { grid-template-columns: 1fr; }.admin-staff-form { grid-template-columns: 1fr; }.admin-staff-form label { grid-column: 1; }.admin-staff-row { grid-template-columns: minmax(0, 1fr) auto; }.admin-staff-row > small { display: none; }.admin-staff-row .admin-row-actions { grid-column: 2; } }
+@media (max-width: 650px) { .admin-content-page { padding-top: 24px; }.admin-content-head h1 { font-size: 27px; }.admin-content-head p { max-width: 270px; line-height: 1.5; }.admin-event-row { grid-template-columns: 42px minmax(0, 1fr); }.admin-event-row > img,.admin-event-placeholder { width: 42px; height: 42px; }.admin-event-row .admin-row-actions { grid-column: 2; }.admin-form-pair { grid-template-columns: 1fr; }.admin-staff-form { grid-template-columns: 1fr; }.admin-staff-form label { grid-column: 1; }.admin-staff-row { grid-template-columns: minmax(0, 1fr) auto; }.admin-staff-row > small { display: none; }.admin-staff-row .admin-row-actions { grid-column: 2; }.admin-user-search { align-items: stretch; flex-wrap: wrap; }.admin-user-search label { flex-basis: 100%; }.admin-user-search .admin-primary { flex: 1; } }
 @media (max-width: 540px) { .admin-theme-options { grid-template-columns: 1fr; }.admin-theme-panel > .admin-section-head { align-items: flex-start; flex-direction: column; }.admin-theme-panel > .admin-section-head .admin-primary { width: 100%; } }
 </style>

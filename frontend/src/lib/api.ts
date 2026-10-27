@@ -157,6 +157,19 @@ export type StaffWallet = {
   createdAt: string
 }
 
+export type AdminUser = {
+  identityKey: string
+  email: string | null
+  username: string | null
+  authType: 'email' | 'wallet'
+  createdAt: string
+  bannedAt: string | null
+  banReason: string | null
+  invitedCount: number
+}
+
+export type AdminInviteLeader = Pick<AdminUser, 'identityKey' | 'email' | 'username' | 'authType' | 'createdAt' | 'invitedCount'>
+
 export type SeasonalTheme = 'none' | 'christmas' | 'halloween' | 'new-year'
 const seasonalThemeValues = new Set<string>(['none', 'christmas', 'halloween', 'new-year'])
 
@@ -368,6 +381,35 @@ export async function fetchAdminStaff(token: string): Promise<StaffWallet[]> {
   return payload.staff
 }
 
+export async function fetchAdminUsers(token: string, search: string, status: 'all' | 'banned', offset: number): Promise<{ users: AdminUser[]; total: number; limit: number; offset: number }> {
+  const params = new URLSearchParams({ search, status, limit: '50', offset: String(offset) })
+  const payload = await adminRequest<{ users?: AdminUser[]; total?: number; limit?: number; offset?: number }>(token, `/api/admin/users?${params}`)
+  if (!Array.isArray(payload.users) || typeof payload.total !== 'number' || typeof payload.limit !== 'number' || typeof payload.offset !== 'number') {
+    throw new Error('The user directory was not returned.')
+  }
+  return { users: payload.users, total: payload.total, limit: payload.limit, offset: payload.offset }
+}
+
+export async function fetchAdminInviteLeaderboard(token: string, search: string, offset: number): Promise<{ leaders: AdminInviteLeader[]; total: number; limit: number; offset: number }> {
+  const params = new URLSearchParams({ search, limit: '50', offset: String(offset) })
+  const payload = await adminRequest<{ leaders?: AdminInviteLeader[]; total?: number; limit?: number; offset?: number }>(token, `/api/admin/invites/leaderboard?${params}`)
+  if (!Array.isArray(payload.leaders) || typeof payload.total !== 'number' || typeof payload.limit !== 'number' || typeof payload.offset !== 'number') {
+    throw new Error('The invite leaderboard was not returned.')
+  }
+  return { leaders: payload.leaders, total: payload.total, limit: payload.limit, offset: payload.offset }
+}
+
+export function banAdminUser(token: string, identityKey: string, reason: string): Promise<Pick<AdminUser, 'identityKey' | 'bannedAt' | 'banReason'>> {
+  return adminRequest(token, `/api/admin/users/${encodeURIComponent(identityKey)}/ban`, {
+    method: 'PUT',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export async function unbanAdminUser(token: string, identityKey: string): Promise<void> {
+  await adminRequest<null>(token, `/api/admin/users/${encodeURIComponent(identityKey)}/ban`, { method: 'DELETE' })
+}
+
 export function addStaffWallet(token: string, walletAddress: string): Promise<StaffWallet> {
   return adminRequest(token, '/api/admin/staff', { method: 'POST', body: JSON.stringify({ walletAddress }) })
 }
@@ -398,11 +440,11 @@ export async function requestWalletChallenge(address: string): Promise<{ nonce: 
   return { nonce: payload.nonce, message: payload.message }
 }
 
-export async function verifyWalletLogin(address: string, nonce: string, signature: number[]): Promise<{ token: string; profile: AuthProfile; profileAvailable: boolean }> {
+export async function verifyWalletLogin(address: string, nonce: string, signature: number[], inviteCode = ''): Promise<{ token: string; profile: AuthProfile; profileAvailable: boolean }> {
   const response = await fetch(`${apiBaseUrl}/api/auth/wallet/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, nonce, signature }),
+    body: JSON.stringify({ address, nonce, signature, inviteCode }),
   })
   const payload = await readApiResponse<{ token?: string; profile?: AuthProfile; profileAvailable?: boolean; error?: string }>(response, 'Could not verify the wallet signature.')
   if (!response.ok || !payload.token || !payload.profile) throw new Error(payload.error || 'Could not verify the wallet signature.')
@@ -422,22 +464,22 @@ export async function requestEvmWalletChallenge(address: string, chainId: number
 
 export type AuthProfile = { username: string | null; avatarSeed: number; trackedWalletAddress?: string | null; deletionScheduledAt?: string | null }
 
-export async function verifyEvmWalletLogin(address: string, nonce: string, signature: string): Promise<{ token: string; profile: AuthProfile; profileAvailable: boolean }> {
+export async function verifyEvmWalletLogin(address: string, nonce: string, signature: string, inviteCode = ''): Promise<{ token: string; profile: AuthProfile; profileAvailable: boolean }> {
   const response = await fetch(`${apiBaseUrl}/api/auth/wallet/evm-verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, nonce, signature }),
+    body: JSON.stringify({ address, nonce, signature, inviteCode }),
   })
   const payload = await readApiResponse<{ token?: string; profile?: AuthProfile; profileAvailable?: boolean; error?: string }>(response, 'Could not verify the EVM wallet signature.')
   if (!response.ok || !payload.token || !payload.profile) throw new Error(payload.error || 'Could not verify the EVM wallet signature.')
   return { token: payload.token, profile: payload.profile, profileAvailable: payload.profileAvailable !== false }
 }
 
-async function emailAuth(path: 'login' | 'register', email: string, password: string, username?: string): Promise<{ token: string; email: string; profile: AuthProfile }> {
+async function emailAuth(path: 'login' | 'register', email: string, password: string, username?: string, inviteCode = ''): Promise<{ token: string; email: string; profile: AuthProfile }> {
   const response = await fetch(`${apiBaseUrl}/api/auth/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, username }),
+    body: JSON.stringify({ email, password, username, inviteCode }),
   })
   const payload = await readApiResponse<{ token?: string; user?: { email?: string }; profile?: AuthProfile; error?: string }>(response, 'Email sign-in failed.')
   if (!response.ok || !payload.token || !payload.user?.email) throw new Error(payload.error || 'Email sign-in failed.')
@@ -449,8 +491,8 @@ export function loginWithEmail(email: string, password: string) {
   return emailAuth('login', email, password)
 }
 
-export function registerWithEmail(email: string, password: string, username: string) {
-  return emailAuth('register', email, password, username)
+export function registerWithEmail(email: string, password: string, username: string, inviteCode = '') {
+  return emailAuth('register', email, password, username, inviteCode)
 }
 
 export async function fetchAuthProfile(token: string): Promise<AuthProfile> {
@@ -460,6 +502,18 @@ export async function fetchAuthProfile(token: string): Promise<AuthProfile> {
   const payload = await readApiResponse<{ profile?: AuthProfile; error?: string }>(response, 'Could not load your profile.')
   if (!response.ok || !payload.profile) throw new Error(payload.error || 'Could not load your profile.')
   return payload.profile
+}
+
+export async function fetchReferralStats(token: string): Promise<{ inviteCode: string; invitedCount: number }> {
+  const response = await fetch(`${apiBaseUrl}/api/auth/profile/invites`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  })
+  const payload = await readApiResponse<{ inviteCode?: string; invitedCount?: number; error?: string }>(response, 'Could not load your invite link.')
+  if (!response.ok || !payload.inviteCode || typeof payload.invitedCount !== 'number') {
+    throw new Error(payload.error || 'Could not load your invite link.')
+  }
+  return { inviteCode: payload.inviteCode, invitedCount: payload.invitedCount }
 }
 
 export async function saveAuthProfile(token: string, username: string): Promise<AuthProfile> {

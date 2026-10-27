@@ -8,6 +8,7 @@ import bs58 from 'bs58'
 import nacl from 'tweetnacl'
 import {
   fetchAuthProfile,
+  fetchReferralStats,
   fetchWalletBalance,
   loginWithEmail,
   recordWalletConnection,
@@ -131,6 +132,11 @@ const trackingWalletMessage = ref('')
 const linkWalletMode = ref(false)
 const signupUsername = ref('')
 const avatarSeed = ref(0)
+const inviteCode = ref('')
+const invitedCount = ref(0)
+const inviteLoading = ref(false)
+const inviteError = ref('')
+const inviteNotice = ref('')
 const profileSetup = ref(false)
 const profileSaving = ref(false)
 const emailAddress = ref('')
@@ -146,6 +152,7 @@ const pendingSession = ref<PendingSession | null>(null)
 const walletSessionTokenKey = 'memescope-wallet-token'
 const walletSessionAddressKey = 'memescope-wallet-address'
 const walletSessionMetadataKey = 'memescope-wallet-metadata'
+const referralCodeStorageKey = 'memescope-pending-invite-code'
 const recentWalletsKey = 'memescope-recent-wallets'
 const localProfileKeyPrefix = 'memescope-wallet-profile:'
 const phantomDeepLinkStateKey = 'memescope-phantom-deeplink'
@@ -155,6 +162,24 @@ const phantomCallbackParameters = ['phantom_callback', 'phantom_encryption_publi
 const phantomAppCallbackUrl = 'com.cobramemescope.app://phantom-callback'
 const publicAppUrl = import.meta.env.VITE_PUBLIC_APP_URL || ''
 const openLoginEventName = 'memescope:open-login'
+
+const inviteLink = computed(() => {
+  if (!inviteCode.value) return ''
+  const url = new URL('/', publicAppUrl || window.location.origin)
+  url.searchParams.set('ref', inviteCode.value)
+  return url.toString()
+})
+
+function readReferralCode() {
+  const fromUrl = new URL(window.location.href).searchParams.get('ref') || ''
+  if (/^[a-f0-9]{24}$/.test(fromUrl)) localStorage.setItem(referralCodeStorageKey, fromUrl)
+  const saved = localStorage.getItem(referralCodeStorageKey) || ''
+  return /^[a-f0-9]{24}$/.test(saved) ? saved : ''
+}
+
+function clearReferralCode() {
+  localStorage.removeItem(referralCodeStorageKey)
+}
 
 function readWalletSessionValue(key: string) {
   const saved = localStorage.getItem(key)
@@ -406,6 +431,10 @@ function clearConnection() {
   trackingWalletMessage.value = ''
   linkWalletMode.value = false
   avatarSeed.value = 0
+  inviteCode.value = ''
+  invitedCount.value = 0
+  inviteError.value = ''
+  inviteNotice.value = ''
   profileSetup.value = false
   pendingSession.value = null
   solBalance.value = null
@@ -486,6 +515,7 @@ async function restoreWalletSession() {
     }
     if (walletType.value === 'solana') void refreshSolBalance(token)
     emit('wallet-session', { address: savedAddress, token, authType: authType.value, username: username.value, avatarSeed: avatarSeed.value })
+    void loadReferralStats()
     return
   }
   try {
@@ -508,6 +538,7 @@ async function restoreWalletSession() {
     }
     if (walletType.value === 'solana') void refreshSolBalance(token)
     emit('wallet-session', { address: savedAddress, token, authType: authType.value, username: username.value, avatarSeed: profile.avatarSeed })
+    void loadReferralStats()
   } catch (error) {
     errorMessage.value = readableError(error)
   }
@@ -515,6 +546,7 @@ async function restoreWalletSession() {
 
 async function completeSignIn(session: PendingSession) {
   clearConnection()
+  clearReferralCode()
   address.value = session.address
   walletName.value = session.walletName
   walletType.value = session.walletType
@@ -562,6 +594,7 @@ function publishSession(sessionAddress: string, token: string, method: string, p
   profileSetup.value = false
   dialogOpen.value = false
   emit('wallet-session', { address: sessionAddress, token, authType: method, username: profile.username || undefined, avatarSeed: profile.avatarSeed })
+  void loadReferralStats()
 }
 
 async function finishProfileSetup() {
@@ -621,6 +654,35 @@ function openSettings() {
   deleteConfirmation.value = ''
   errorMessage.value = ''
   dialogOpen.value = true
+  void loadReferralStats()
+}
+
+async function loadReferralStats() {
+  if (!sessionToken.value || inviteLoading.value) return
+  inviteLoading.value = true
+  inviteError.value = ''
+  inviteNotice.value = ''
+  try {
+    const stats = await fetchReferralStats(sessionToken.value)
+    inviteCode.value = stats.inviteCode
+    invitedCount.value = stats.invitedCount
+  } catch (error) {
+    inviteError.value = readableError(error)
+  } finally {
+    inviteLoading.value = false
+  }
+}
+
+async function copyInviteLink() {
+  if (!inviteLink.value) return
+  inviteError.value = ''
+  inviteNotice.value = ''
+  try {
+    await navigator.clipboard.writeText(inviteLink.value)
+    inviteNotice.value = 'Invite link copied. Share it with your friends.'
+  } catch (error) {
+    inviteError.value = error instanceof Error ? `Could not copy the invite link: ${error.message}` : 'Could not copy the invite link. Select and copy it manually.'
+  }
 }
 
 async function deleteAccount() {
@@ -629,6 +691,7 @@ async function deleteAccount() {
   errorMessage.value = ''
   try {
     deletionScheduledAt.value = await deleteAuthAccount(sessionToken.value)
+    emit('account-deleted')
     deletePromptOpen.value = false
     deleteConfirmation.value = ''
     await disconnectWallet()
@@ -724,7 +787,7 @@ async function connectEvm(provider: EvmProvider, name: string) {
     const chainId = await provider.request({ method: 'eth_chainId' }) as string
     const challenge = await requestEvmWalletChallenge(accounts[0], Number.parseInt(chainId, 16))
     const signature = await provider.request({ method: 'personal_sign', params: [challenge.message, accounts[0]] }) as string
-    const result = await verifyEvmWalletLogin(accounts[0], challenge.nonce, signature)
+    const result = await verifyEvmWalletLogin(accounts[0], challenge.nonce, signature, readReferralCode())
     await completeSignIn({ address: accounts[0], token: result.token, authType: 'wallet', walletName: name, walletType: 'evm', network: networkName(chainId), profile: result.profile, profileAvailable: result.profileAvailable })
     markWalletRecent(`evm:${name}`)
     void recordWalletConnection(accounts[0]).catch(() => undefined)
@@ -763,7 +826,7 @@ async function connectSolana(provider: SolanaProvider, name: string) {
     const challenge = await requestWalletChallenge(walletAddress)
     const signed = await provider.signMessage(new TextEncoder().encode(challenge.message), 'utf8')
     if (!signed.signature?.length) throw new Error(`${name} did not return a signature.`)
-    const session = await verifyWalletLogin(walletAddress, challenge.nonce, Array.from(signed.signature))
+    const session = await verifyWalletLogin(walletAddress, challenge.nonce, Array.from(signed.signature), readReferralCode())
     await completeSignIn({ address: walletAddress, token: session.token, authType: 'wallet', walletName: name, walletType: 'solana', network: 'Solana', profile: session.profile, profileAvailable: session.profileAvailable })
     if (name === 'Phantom') sessionStorage.removeItem(phantomBrowserHandoffKey)
     markWalletRecent(`solana:${name}`)
@@ -801,7 +864,7 @@ async function finishEmailAuth() {
   emailBusy.value = true
   try {
     const result = emailMode.value === 'signup'
-      ? await registerWithEmail(emailAddress.value, emailPassword.value, signupUsername.value.trim())
+      ? await registerWithEmail(emailAddress.value, emailPassword.value, signupUsername.value.trim(), readReferralCode())
       : await loginWithEmail(emailAddress.value, emailPassword.value)
     await completeSignIn({ address: result.email, token: result.token, authType: 'email', walletName: 'Email', walletType: '', network: result.email, profile: result.profile })
     emailPassword.value = ''
@@ -984,7 +1047,7 @@ async function resumePhantomDeepLink(returnedUrl = window.location.href) {
     const signature = String(signed.signature || '')
     if (!signature) throw new Error('Phantom did not return a message signature.')
     sessionStorage.removeItem(phantomDeepLinkStateKey)
-    const session = await verifyWalletLogin(state.walletAddress, state.challenge.nonce, Array.from(bs58.decode(signature)))
+    const session = await verifyWalletLogin(state.walletAddress, state.challenge.nonce, Array.from(bs58.decode(signature)), readReferralCode())
     await completeSignIn({
       address: state.walletAddress,
       token: session.token,
@@ -1069,6 +1132,7 @@ function handleCountryChange(event: Event) {
 }
 
 onMounted(() => {
+  readReferralCode()
   window.addEventListener(openLoginEventName, handleOpenLoginRequest)
   recentWalletKeys.value = readRecentWallets()
   void refreshCurrencyRates().catch((error) => console.error('Currency exchange rate refresh failed:', error))
@@ -1151,6 +1215,7 @@ onBeforeUnmount(() => {
           <p v-if="deletionScheduledAt">This account is deactivated and will be permanently deleted on {{ new Date(deletionScheduledAt).toLocaleString() }}. Cancel before then to restore access.</p>
           <p v-else>Deactivate this account now. Its saved profile and watchlist data will be permanently deleted after a 3-day grace period. You can cancel during that period.</p>
           <button v-if="deletionScheduledAt" class="secondary-action" type="button" :disabled="deletingAccount" @click="cancelAccountDeletion">{{ deletingAccount ? 'Restoring…' : 'Cancel scheduled deletion' }}</button>
+          <button v-if="deletionScheduledAt" class="disconnect-action" type="button" :disabled="deletingAccount" @click="disconnectWallet">Sign out</button>
           <button v-else-if="!deletePromptOpen" class="delete-account-trigger" type="button" @click="deletePromptOpen = true">Delete account</button>
           <form v-else class="delete-confirm-form" @submit.prevent="deleteAccount">
             <label for="delete-account-confirmation">Type <b>DELETE</b> to confirm</label>
@@ -1186,6 +1251,19 @@ onBeforeUnmount(() => {
           <span class="address-short">{{ walletType ? shortenedAddress : '' }}</span>
         </div>
         <div v-if="walletType" class="full-address">{{ address }}</div>
+        <section v-if="!deletionScheduledAt" class="invite-preference" aria-labelledby="invite-link-title">
+          <div class="invite-preference-heading">
+            <div><strong id="invite-link-title">Invite friends</strong><small>Share your personal link. New users who sign up through it are counted here.</small></div>
+            <span class="invite-count"><strong>{{ invitedCount }}</strong><small>INVITED</small></span>
+          </div>
+          <div class="invite-link-row">
+            <input :value="inviteLoading ? 'Loading your invite link…' : inviteLink" aria-label="Your personal invite link" readonly />
+            <button type="button" :disabled="inviteLoading || !inviteLink" @click="copyInviteLink">{{ inviteLoading ? 'LOADING…' : 'COPY LINK' }}</button>
+          </div>
+          <button v-if="inviteError && !inviteCode" type="button" class="invite-retry" :disabled="inviteLoading" @click="loadReferralStats">RETRY LOADING INVITE LINK</button>
+          <p v-if="inviteError" class="invite-message invite-error" role="alert">{{ inviteError }}</p>
+          <p v-else-if="inviteNotice" class="invite-message invite-success" role="status">{{ inviteNotice }}</p>
+        </section>
         <section v-if="authType === 'email'" class="tracked-wallet-form">
           <div class="tracked-wallet-heading">
             <div><label>OWNER WALLET</label><p>Link your wallet to view meme-token balances across Solana and supported EVM networks.</p></div>
@@ -1289,6 +1367,22 @@ onBeforeUnmount(() => {
 .settings-profile .connected-details { min-width: 0; }
 .settings-profile .connected-details span { overflow-wrap: anywhere; }
 .settings-profile .secondary-action { max-width: 112px; }
+.invite-preference { display: grid; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #3b4736; border-radius: 10px; background: linear-gradient(120deg, #202a1e, #171e18); }
+.invite-preference-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.invite-preference-heading > div { display: grid; gap: 4px; }
+.invite-preference-heading > div > strong { color: #e6efd9; font-size: 12px; }
+.invite-preference-heading > div > small { color: #a8b399; font-size: 10px; line-height: 1.5; }
+.invite-count { display: grid; min-width: 55px; justify-items: center; gap: 2px; padding: 6px 9px; border: 1px solid #3b4736; border-radius: 9px; background: #202820; }
+.invite-count strong { color: #c7eb6c; font-size: 17px; }
+.invite-count small { color: #a8b399; font-size: 7px; font-weight: 800; letter-spacing: .08em; }
+.invite-link-row { display: flex; min-width: 0; gap: 7px; }
+.invite-link-row input { width: 100%; min-width: 0; height: 38px; padding: 0 9px; border: 1px solid #3b4438; border-radius: 7px; outline: 0; background: #151a16; color: #d7e4c8; font: 10px 'DM Sans', sans-serif; }
+.invite-link-row button,.invite-retry { min-height: 38px; flex: 0 0 auto; padding: 0 10px; border: 1px solid #46533c; border-radius: 7px; background: #263222; color: #d9e6c2; font: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
+.invite-link-row button:disabled,.invite-retry:disabled { cursor: wait; opacity: .6; }
+.invite-retry { justify-self: start; min-height: 30px; }
+.invite-message { margin: 0; font-size: 10px; line-height: 1.5; }
+.invite-error { color: #f0b5a9; }
+.invite-success { color: #b7d98f; }
 .currency-preference { display: grid; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #363e35; border-radius: 10px; background: #171d18; }
 .currency-preference > div:first-child { display: grid; gap: 4px; }
 .currency-preference > div:first-child strong { font-size: 12px; }

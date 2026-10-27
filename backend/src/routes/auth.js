@@ -2,6 +2,7 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { rateLimit } from 'express-rate-limit'
+import { randomBytes } from 'node:crypto'
 import { pool, query } from '../db.js'
 import { createEvmWalletChallenge, createWalletChallenge, verifyEvmWalletChallenge, verifyWalletChallenge } from '../services/walletAuth.js'
 import { isAllowedFrontendOrigin } from '../utils/frontendOrigins.js'
@@ -63,7 +64,15 @@ async function ensureProfileTable() {
         )
       `)
       await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS tracked_wallet_address TEXT')
+      await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ')
+      await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ')
+      await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS ban_reason TEXT')
+      await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS banned_by TEXT')
+      await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS invite_code TEXT')
+      await query('ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS referred_by_identity_key TEXT REFERENCES user_profiles(identity_key) ON DELETE SET NULL')
       await query('CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_username_lower_idx ON user_profiles (LOWER(username)) WHERE username IS NOT NULL')
+      await query('CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_invite_code_idx ON user_profiles (invite_code) WHERE invite_code IS NOT NULL')
+      await query('CREATE INDEX IF NOT EXISTS user_profiles_referred_by_idx ON user_profiles (referred_by_identity_key) WHERE referred_by_identity_key IS NOT NULL')
     })().catch((error) => {
       profileTableSetup = undefined
       throw error
@@ -72,14 +81,31 @@ async function ensureProfileTable() {
   await profileTableSetup
 }
 
-async function ensureUserProfile(identityKey, email = null) {
+function createInviteCode() {
+  return randomBytes(12).toString('hex')
+}
+
+async function findInviterIdentity(inviteCode) {
+  if (!inviteCode) return null
+  const result = await query(
+    `SELECT identity_key
+     FROM user_profiles
+     WHERE invite_code = $1 AND banned_at IS NULL AND deletion_scheduled_at IS NULL`,
+    [inviteCode],
+  )
+  return result.rows[0]?.identity_key || null
+}
+
+async function ensureUserProfile(identityKey, email = null, inviterIdentity = null) {
   await ensureProfileTable()
   const result = await query(
-    `INSERT INTO user_profiles (identity_key, email)
-     VALUES ($1, $2)
-     ON CONFLICT (identity_key) DO UPDATE SET email = COALESCE(user_profiles.email, EXCLUDED.email)
-     RETURNING identity_key, email, username, avatar_seed, tracked_wallet_address, created_at, deletion_scheduled_at`,
-    [identityKey, email],
+    `INSERT INTO user_profiles (identity_key, email, invite_code, referred_by_identity_key)
+     VALUES ($1, $2, $3, CASE WHEN $4 = $1 THEN NULL ELSE $4 END)
+     ON CONFLICT (identity_key) DO UPDATE
+     SET email = COALESCE(user_profiles.email, EXCLUDED.email),
+         invite_code = COALESCE(user_profiles.invite_code, EXCLUDED.invite_code)
+     RETURNING identity_key, email, username, avatar_seed, tracked_wallet_address, created_at, deletion_scheduled_at, banned_at, ban_reason, invite_code, referred_by_identity_key`,
+    [identityKey, email, createInviteCode(), inviterIdentity],
   )
   return result.rows[0]
 }
@@ -93,14 +119,16 @@ function identityProfile(profile) {
   }
 }
 
-async function walletProfile(identityKey) {
+async function walletProfile(identityKey, inviterIdentity = null) {
   try {
-    const profile = await ensureUserProfile(identityKey)
+    const profile = await ensureUserProfile(identityKey, null, inviterIdentity)
     return {
       profile: identityProfile(profile),
       profileAvailable: true,
       profileCreatedAt: new Date(profile.created_at).getTime(),
       deletionScheduledAt: profile.deletion_scheduled_at,
+      bannedAt: profile.banned_at,
+      banReason: profile.ban_reason,
     }
   } catch (error) {
     console.warn('Wallet profile storage unavailable:', error.message)
@@ -109,6 +137,8 @@ async function walletProfile(identityKey) {
       profileAvailable: false,
       profileCreatedAt: null,
       deletionScheduledAt: null,
+      bannedAt: null,
+      banReason: null,
     }
   }
 }
@@ -121,25 +151,32 @@ router.post('/register', requireJwtSecret, authLimiter, async (request, response
   const email = String(request.body?.email || '').trim().toLowerCase()
   const password = String(request.body?.password || '')
   const username = String(request.body?.username || '').trim()
+  const inviteCode = String(request.body?.inviteCode || '').trim()
   if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 10 || password.length > 128 || !/^[A-Za-z0-9_]{3,24}$/.test(username)) {
     return response.status(400).json({ error: 'Enter a valid email, a username of 3–24 letters/numbers/underscores, and a password of 10–128 characters.' })
+  }
+  if (inviteCode && !/^[a-f0-9]{24}$/.test(inviteCode)) {
+    return response.status(400).json({ error: 'This invite link is invalid. Ask your friend for a fresh invite link.' })
   }
 
   try {
     await ensureProfileTable()
+    const inviterIdentity = inviteCode ? await findInviterIdentity(inviteCode) : null
+    if (inviteCode && !inviterIdentity) return response.status(400).json({ error: 'This invite link is invalid. Ask your friend for a fresh invite link.' })
     const passwordHash = await bcrypt.hash(password, 12)
+    const inviteCodeForUser = createInviteCode()
     const result = await query(
       `WITH new_user AS (
          INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email
        ),
        new_profile AS (
-         INSERT INTO user_profiles (identity_key, email, username)
-         SELECT id::TEXT, email, $3 FROM new_user
+         INSERT INTO user_profiles (identity_key, email, username, invite_code, referred_by_identity_key)
+         SELECT id::TEXT, email, $3, $4, $5 FROM new_user
          RETURNING username, avatar_seed
        )
        SELECT new_user.id, new_user.email, new_profile.username, new_profile.avatar_seed
        FROM new_user CROSS JOIN new_profile`,
-      [email, passwordHash, username],
+      [email, passwordHash, username, inviteCodeForUser, inviterIdentity],
     )
     const user = result.rows[0]
     await recordLoginEvent({ userId: user.id, authType: 'email' })
@@ -162,11 +199,18 @@ router.post('/login', requireJwtSecret, authLimiter, async (request, response, n
   const password = String(request.body?.password || '')
 
   try {
-    const result = await query('SELECT id, email, password_hash FROM users WHERE email = $1', [email])
+    const result = await query(
+      `SELECT users.id, users.email, users.password_hash, profiles.banned_at, profiles.ban_reason
+       FROM users
+       LEFT JOIN user_profiles AS profiles ON profiles.identity_key = users.id::TEXT
+       WHERE users.email = $1`,
+      [email],
+    )
     const user = result.rows[0]
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return response.status(401).json({ error: 'Email or password is incorrect.' })
     }
+    if (user.banned_at) return response.status(403).json({ error: `This account is banned. Reason: ${user.ban_reason || 'No reason provided.'}` })
     await recordLoginEvent({ userId: user.id, authType: 'email' })
     response.json({ token: createToken(user), user: { id: user.id, email: user.email } })
   } catch (error) {
@@ -190,18 +234,32 @@ router.post('/wallet/verify', requireJwtSecret, authLimiter, async (request, res
   const address = String(request.body?.address || '')
   const nonce = String(request.body?.nonce || '')
   const signature = request.body?.signature
+  const inviteCode = String(request.body?.inviteCode || '').trim()
   if (!verifyWalletChallenge(address, nonce, signature)) {
     return response.status(401).json({ error: 'Wallet signature is invalid or expired. Request a new sign-in message.' })
   }
 
   await recordLoginEvent({ walletAddress: address, authType: 'wallet' })
-  const result = await walletProfile(address)
+  let inviterIdentity = null
+  try {
+    await ensureProfileTable()
+    const existing = await query('SELECT 1 FROM user_profiles WHERE identity_key = $1', [address])
+    if (!existing.rowCount && inviteCode) {
+      if (!/^[a-f0-9]{24}$/.test(inviteCode)) return response.status(400).json({ error: 'This invite link is invalid. Ask your friend for a fresh invite link.' })
+      inviterIdentity = await findInviterIdentity(inviteCode)
+      if (!inviterIdentity) return response.status(400).json({ error: 'This invite link is invalid. Ask your friend for a fresh invite link.' })
+    }
+  } catch (error) {
+    return next(error)
+  }
+  const result = await walletProfile(address, inviterIdentity)
+  if (result.bannedAt) return response.status(403).json({ error: `This wallet is banned. Reason: ${result.banReason || 'No reason provided.'}` })
   const token = jwt.sign(
     { authType: 'wallet', walletAddress: address, walletType: 'solana', profileCreatedAt: result.profileCreatedAt, iat: Math.floor(Date.now() / 1000) },
     process.env.JWT_SECRET,
     { subject: address, expiresIn: '12h' },
   )
-  const { profileCreatedAt: _profileCreatedAt, ...publicResult } = result
+  const { profileCreatedAt: _profileCreatedAt, bannedAt: _bannedAt, banReason: _banReason, ...publicResult } = result
   response.json({ token, walletAddress: address, ...publicResult })
 })
 
@@ -221,6 +279,7 @@ router.post('/wallet/evm-verify', requireJwtSecret, authLimiter, async (request,
   const address = String(request.body?.address || '')
   const nonce = String(request.body?.nonce || '')
   const signature = request.body?.signature
+  const inviteCode = String(request.body?.inviteCode || '').trim()
   if (!verifyEvmWalletChallenge(address, nonce, signature)) {
     return response.status(401).json({ error: 'Wallet signature is invalid or expired. Request a new sign-in message.' })
   }
@@ -228,13 +287,26 @@ router.post('/wallet/evm-verify', requireJwtSecret, authLimiter, async (request,
   const normalizedAddress = address.toLowerCase()
   const subject = `evm:${normalizedAddress}`
   await recordLoginEvent({ walletAddress: address, authType: 'wallet' })
-  const result = await walletProfile(subject)
+  let inviterIdentity = null
+  try {
+    await ensureProfileTable()
+    const existing = await query('SELECT 1 FROM user_profiles WHERE identity_key = $1', [subject])
+    if (!existing.rowCount && inviteCode) {
+      if (!/^[a-f0-9]{24}$/.test(inviteCode)) return response.status(400).json({ error: 'This invite link is invalid. Ask your friend for a fresh invite link.' })
+      inviterIdentity = await findInviterIdentity(inviteCode)
+      if (!inviterIdentity) return response.status(400).json({ error: 'This invite link is invalid. Ask your friend for a fresh invite link.' })
+    }
+  } catch (error) {
+    return next(error)
+  }
+  const result = await walletProfile(subject, inviterIdentity)
+  if (result.bannedAt) return response.status(403).json({ error: `This wallet is banned. Reason: ${result.banReason || 'No reason provided.'}` })
   const token = jwt.sign(
     { authType: 'wallet', walletAddress: address, walletType: 'evm', profileCreatedAt: result.profileCreatedAt, iat: Math.floor(Date.now() / 1000) },
     process.env.JWT_SECRET,
     { subject, expiresIn: '12h' },
   )
-  const { profileCreatedAt: _profileCreatedAt, ...publicResult } = result
+  const { profileCreatedAt: _profileCreatedAt, bannedAt: _bannedAt, banReason: _banReason, ...publicResult } = result
   response.json({ token, walletAddress: address, ...publicResult })
 })
 
@@ -245,6 +317,20 @@ router.get('/profile', requireAuthAllowPendingDeletion, async (request, response
       profile: identityProfile(profile),
       deletionScheduledAt: profile.deletion_scheduled_at,
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+router.get('/profile/invites', requireAuth, async (request, response, next) => {
+  try {
+    const profile = await ensureUserProfile(request.user.id, request.user.email || null)
+    const result = await query(
+      'SELECT COUNT(*)::INTEGER AS invited_count FROM user_profiles WHERE referred_by_identity_key = $1',
+      [request.user.id],
+    )
+    response.set('Cache-Control', 'private, no-store')
+    response.json({ inviteCode: profile.invite_code, invitedCount: result.rows[0].invited_count })
   } catch (error) {
     next(error)
   }

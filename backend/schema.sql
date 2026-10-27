@@ -13,11 +13,31 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   tracked_wallet_address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  deletion_scheduled_at TIMESTAMPTZ
+  deletion_scheduled_at TIMESTAMPTZ,
+  banned_at TIMESTAMPTZ,
+  ban_reason TEXT,
+  banned_by TEXT,
+  invite_code TEXT,
+  referred_by_identity_key TEXT REFERENCES user_profiles(identity_key) ON DELETE SET NULL
 );
 
 ALTER TABLE user_profiles
   ADD COLUMN IF NOT EXISTS deletion_scheduled_at TIMESTAMPTZ;
+
+ALTER TABLE user_profiles
+  ADD COLUMN IF NOT EXISTS banned_at TIMESTAMPTZ;
+
+ALTER TABLE user_profiles
+  ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+
+ALTER TABLE user_profiles
+  ADD COLUMN IF NOT EXISTS banned_by TEXT;
+
+ALTER TABLE user_profiles
+  ADD COLUMN IF NOT EXISTS invite_code TEXT;
+
+ALTER TABLE user_profiles
+  ADD COLUMN IF NOT EXISTS referred_by_identity_key TEXT REFERENCES user_profiles(identity_key) ON DELETE SET NULL;
 
 ALTER TABLE user_profiles
   ADD COLUMN IF NOT EXISTS tracked_wallet_address TEXT;
@@ -25,6 +45,18 @@ ALTER TABLE user_profiles
 CREATE INDEX IF NOT EXISTS user_profiles_deletion_scheduled_at_idx
   ON user_profiles (deletion_scheduled_at)
   WHERE deletion_scheduled_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS user_profiles_banned_at_idx
+  ON user_profiles (banned_at)
+  WHERE banned_at IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_invite_code_idx
+  ON user_profiles (invite_code)
+  WHERE invite_code IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS user_profiles_referred_by_idx
+  ON user_profiles (referred_by_identity_key)
+  WHERE referred_by_identity_key IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_username_lower_idx
   ON user_profiles (LOWER(username))

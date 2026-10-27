@@ -2,7 +2,8 @@ import { Router } from 'express'
 import express from 'express'
 import { rateLimit } from 'express-rate-limit'
 import bs58 from 'bs58'
-import { requireAdminWalletAuth, requireOwnerOrStaffWalletAuth, requireOwnerWalletAuth } from '../middleware/auth.js'
+import { ADMIN_WALLET_ADDRESS, requireAdminWalletAuth, requireOwnerOrStaffWalletAuth, requireOwnerWalletAuth } from '../middleware/auth.js'
+import { query } from '../db.js'
 import { getDonorDashboard } from '../services/donorActivity.js'
 import { addStaffWallet, deleteLandingEvent, deleteStaffWallet, listLandingEvents, listStaffWallets, saveLandingEvent, saveLandingEventImage } from '../services/landingContent.js'
 import { saveSeasonalTheme, seasonalThemes } from '../services/siteTheme.js'
@@ -131,6 +132,203 @@ router.delete('/events/:id', requireOwnerOrStaffWalletAuth, async (request, resp
 
 router.get('/staff', requireOwnerWalletAuth, async (_request, response, next) => {
   try { response.json({ staff: await listStaffWallets() }) } catch (error) { next(error) }
+})
+
+router.get('/invites/leaderboard', requireOwnerWalletAuth, async (request, response, next) => {
+  const search = String(request.query.search || '').trim().slice(0, 100)
+  const limit = Math.min(Math.max(Number.parseInt(String(request.query.limit || '50'), 10) || 50, 1), 100)
+  const offset = Math.max(Number.parseInt(String(request.query.offset || '0'), 10) || 0, 0)
+  try {
+    const result = await query(
+      `WITH all_accounts AS (
+         SELECT users.id::TEXT AS identity_key,
+                COALESCE(profiles.email, users.email) AS email,
+                profiles.username,
+                'email' AS auth_type,
+                COALESCE(users.created_at, profiles.created_at) AS created_at
+         FROM users
+         LEFT JOIN user_profiles AS profiles ON profiles.identity_key = users.id::TEXT
+         UNION ALL
+         SELECT profiles.identity_key,
+                profiles.email,
+                profiles.username,
+                'wallet' AS auth_type,
+                profiles.created_at
+         FROM user_profiles AS profiles
+         LEFT JOIN users ON profiles.identity_key = users.id::TEXT
+         WHERE users.id IS NULL
+       ),
+       leaderboard AS (
+         SELECT accounts.identity_key,
+                accounts.email,
+                accounts.username,
+                accounts.auth_type,
+                accounts.created_at,
+                COUNT(referrals.identity_key)::INTEGER AS invited_count
+         FROM all_accounts AS accounts
+         LEFT JOIN user_profiles AS referrals ON referrals.referred_by_identity_key = accounts.identity_key
+         WHERE $1 = ''
+            OR POSITION(LOWER($1) IN LOWER(COALESCE(accounts.email, ''))) > 0
+            OR POSITION(LOWER($1) IN LOWER(COALESCE(accounts.username, ''))) > 0
+            OR POSITION(LOWER($1) IN LOWER(accounts.identity_key)) > 0
+         GROUP BY accounts.identity_key, accounts.email, accounts.username, accounts.auth_type, accounts.created_at
+         HAVING COUNT(referrals.identity_key) > 0
+       )
+       SELECT leaderboard.*, COUNT(*) OVER() AS total_count
+       FROM leaderboard
+       ORDER BY invited_count DESC, created_at ASC, identity_key
+       LIMIT $2 OFFSET $3`,
+      [search, limit, offset],
+    )
+    response.set('Cache-Control', 'private, no-store')
+    response.json({
+      leaders: result.rows.map((row) => ({
+        identityKey: row.identity_key,
+        email: row.email,
+        username: row.username,
+        authType: row.auth_type,
+        createdAt: row.created_at,
+        invitedCount: row.invited_count,
+      })),
+      total: Number(result.rows[0]?.total_count || 0),
+      limit,
+      offset,
+    })
+  } catch (error) { next(error) }
+})
+
+router.get('/users', requireOwnerWalletAuth, async (request, response, next) => {
+  const search = String(request.query.search || '').trim().slice(0, 100)
+  const status = request.query.status === 'banned' ? 'banned' : 'all'
+  const limit = Math.min(Math.max(Number.parseInt(String(request.query.limit || '50'), 10) || 50, 1), 100)
+  const offset = Math.max(Number.parseInt(String(request.query.offset || '0'), 10) || 0, 0)
+  try {
+    const values = [search, status === 'banned', limit, offset]
+    const result = await query(
+      `WITH all_accounts AS (
+         SELECT users.id::TEXT AS identity_key,
+                COALESCE(profiles.email, users.email) AS email,
+                profiles.username,
+                'email' AS auth_type,
+                COALESCE(users.created_at, profiles.created_at) AS created_at,
+                profiles.banned_at,
+                profiles.ban_reason,
+                (SELECT COUNT(*)::INTEGER FROM user_profiles AS referrals WHERE referrals.referred_by_identity_key = users.id::TEXT) AS invited_count
+         FROM users
+         LEFT JOIN user_profiles AS profiles ON profiles.identity_key = users.id::TEXT
+         UNION ALL
+         SELECT profiles.identity_key,
+                profiles.email,
+                profiles.username,
+                'wallet' AS auth_type,
+                profiles.created_at,
+                profiles.banned_at,
+                profiles.ban_reason,
+                (SELECT COUNT(*)::INTEGER FROM user_profiles AS referrals WHERE referrals.referred_by_identity_key = profiles.identity_key) AS invited_count
+         FROM user_profiles AS profiles
+         LEFT JOIN users ON profiles.identity_key = users.id::TEXT
+         WHERE users.id IS NULL
+       ),
+       filtered_users AS (
+         SELECT profiles.identity_key,
+                profiles.email,
+                profiles.username,
+                profiles.auth_type,
+                profiles.created_at,
+                profiles.banned_at,
+                profiles.ban_reason,
+                profiles.invited_count
+         FROM all_accounts AS profiles
+         WHERE (NOT $2::BOOLEAN OR profiles.banned_at IS NOT NULL)
+           AND (
+             $1 = ''
+             OR POSITION(LOWER($1) IN LOWER(COALESCE(profiles.email, ''))) > 0
+             OR POSITION(LOWER($1) IN LOWER(COALESCE(profiles.username, ''))) > 0
+             OR POSITION(LOWER($1) IN LOWER(profiles.identity_key)) > 0
+           )
+       )
+       SELECT filtered_users.*, COUNT(*) OVER() AS total_count
+       FROM filtered_users
+       ORDER BY created_at DESC, identity_key
+       LIMIT $3 OFFSET $4`,
+      values,
+    )
+    response.set('Cache-Control', 'private, no-store')
+    response.json({
+      users: result.rows.map((row) => ({
+        identityKey: row.identity_key,
+        email: row.email,
+        username: row.username,
+        authType: row.auth_type,
+        createdAt: row.created_at,
+        bannedAt: row.banned_at,
+        banReason: row.ban_reason,
+        invitedCount: row.invited_count,
+      })),
+      total: Number(result.rows[0]?.total_count || 0),
+      limit,
+      offset,
+    })
+  } catch (error) { next(error) }
+})
+
+router.put('/users/:identityKey/ban', requireOwnerWalletAuth, async (request, response, next) => {
+  const identityKey = String(request.params.identityKey || '').trim()
+  const reason = String(request.body?.reason || '').trim()
+  if (!identityKey || identityKey.length > 256) return response.status(400).json({ error: 'Choose a valid user account.' })
+  if (!reason || reason.length > 500) return response.status(400).json({ error: 'Enter a violation reason of up to 500 characters.' })
+  if (identityKey === request.user.id || identityKey === ADMIN_WALLET_ADDRESS) {
+    return response.status(409).json({ error: 'The developer account cannot be banned.' })
+  }
+  try {
+    const result = await query(
+      `WITH target_account AS (
+         SELECT users.id::TEXT AS identity_key, users.email
+         FROM users
+         WHERE users.id::TEXT = $1
+         UNION ALL
+         SELECT profiles.identity_key, profiles.email
+         FROM user_profiles AS profiles
+         WHERE profiles.identity_key = $1
+           AND NOT EXISTS (SELECT 1 FROM users WHERE users.id::TEXT = $1)
+       )
+       INSERT INTO user_profiles (identity_key, email, banned_at, ban_reason, banned_by)
+       SELECT identity_key, email, NOW(), $2, $3
+       FROM target_account
+       LIMIT 1
+       ON CONFLICT (identity_key) DO UPDATE
+       SET banned_at = NOW(), ban_reason = EXCLUDED.ban_reason, banned_by = EXCLUDED.banned_by, updated_at = NOW()
+       RETURNING identity_key, email, username, banned_at, ban_reason`,
+      [identityKey, reason, request.user.walletAddress],
+    )
+    if (!result.rowCount) return response.status(404).json({ error: 'User account not found.' })
+    response.json({
+      identityKey: result.rows[0].identity_key,
+      email: result.rows[0].email,
+      username: result.rows[0].username,
+      bannedAt: result.rows[0].banned_at,
+      banReason: result.rows[0].ban_reason,
+    })
+  } catch (error) { next(error) }
+})
+
+router.delete('/users/:identityKey/ban', requireOwnerWalletAuth, async (request, response, next) => {
+  const identityKey = String(request.params.identityKey || '').trim()
+  if (!identityKey || identityKey.length > 256) return response.status(400).json({ error: 'Choose a valid user account.' })
+  if (identityKey === request.user.id || identityKey === ADMIN_WALLET_ADDRESS) {
+    return response.status(409).json({ error: 'The developer account cannot be unbanned.' })
+  }
+  try {
+    const result = await query(
+      `UPDATE user_profiles
+       SET banned_at = NULL, ban_reason = NULL, banned_by = NULL, updated_at = NOW()
+       WHERE identity_key = $1 AND banned_at IS NOT NULL
+       RETURNING identity_key`,
+      [identityKey],
+    )
+    if (!result.rowCount) return response.status(404).json({ error: 'Banned user account not found.' })
+    response.status(204).end()
+  } catch (error) { next(error) }
 })
 
 router.post('/staff', requireOwnerWalletAuth, async (request, response, next) => {
