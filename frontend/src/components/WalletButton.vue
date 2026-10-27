@@ -156,6 +156,30 @@ const phantomAppCallbackUrl = 'com.cobramemescope.app://phantom-callback'
 const publicAppUrl = import.meta.env.VITE_PUBLIC_APP_URL || ''
 const openLoginEventName = 'memescope:open-login'
 
+function readWalletSessionValue(key: string) {
+  const saved = localStorage.getItem(key)
+  if (saved !== null) {
+    sessionStorage.removeItem(key)
+    return saved
+  }
+  const legacy = sessionStorage.getItem(key)
+  if (legacy !== null) {
+    localStorage.setItem(key, legacy)
+    sessionStorage.removeItem(key)
+  }
+  return legacy
+}
+
+function writeWalletSessionValue(key: string, value: string) {
+  localStorage.setItem(key, value)
+  sessionStorage.removeItem(key)
+}
+
+function removeWalletSessionValue(key: string) {
+  localStorage.removeItem(key)
+  sessionStorage.removeItem(key)
+}
+
 let activeEvm: EvmProvider | null = null
 let activeSolana: SolanaProvider | null = null
 let accountListener: ProviderEvent | null = null
@@ -364,9 +388,9 @@ function detachListeners() {
 function clearConnection() {
   detachListeners()
   emit('wallet-session', null)
-  sessionStorage.removeItem(walletSessionTokenKey)
-  sessionStorage.removeItem(walletSessionAddressKey)
-  sessionStorage.removeItem(walletSessionMetadataKey)
+  removeWalletSessionValue(walletSessionTokenKey)
+  removeWalletSessionValue(walletSessionAddressKey)
+  removeWalletSessionValue(walletSessionMetadataKey)
   profileAvatarData.value = ''
   address.value = ''
   network.value = ''
@@ -431,27 +455,27 @@ async function refreshSolBalance(token = sessionToken.value) {
 }
 
 async function restoreWalletSession() {
-  const token = sessionStorage.getItem(walletSessionTokenKey) || ''
-  const savedAddress = sessionStorage.getItem(walletSessionAddressKey) || ''
+  const token = readWalletSessionValue(walletSessionTokenKey) || ''
+  const savedAddress = readWalletSessionValue(walletSessionAddressKey) || ''
   if (!token || !savedAddress) return
   let metadata: { authType?: string; walletName?: string; walletType?: WalletType; network?: string; profileAvailable?: boolean; avatarSeed?: number } = {}
   try {
-    metadata = JSON.parse(sessionStorage.getItem(walletSessionMetadataKey) || '{}')
+    metadata = JSON.parse(readWalletSessionValue(walletSessionMetadataKey) || '{}')
   } catch {
-    sessionStorage.removeItem(walletSessionMetadataKey)
+    removeWalletSessionValue(walletSessionMetadataKey)
   }
+  address.value = savedAddress
+  walletName.value = metadata.walletName || 'Phantom'
+  walletType.value = metadata.walletType || 'solana'
+  network.value = metadata.network || 'Solana'
+  authType.value = metadata.authType || 'wallet'
+  sessionToken.value = token
+  avatarSeed.value = metadata.avatarSeed || 0
+  const localProfile = readLocalWalletProfile(savedAddress)
+  profileAvatarData.value = localProfile?.avatarDataUrl || ''
+  username.value = localProfile?.username || ''
   if (metadata.profileAvailable === false) {
-    address.value = savedAddress
-    walletName.value = metadata.walletName || 'Phantom'
-    walletType.value = metadata.walletType || 'solana'
-    network.value = metadata.network || 'Solana'
-    authType.value = metadata.authType || 'wallet'
-    sessionToken.value = token
-    avatarSeed.value = metadata.avatarSeed || 0
     profileStorageAvailable.value = false
-    const localProfile = readLocalWalletProfile(savedAddress)
-    profileAvatarData.value = localProfile?.avatarDataUrl || ''
-    username.value = localProfile?.username || ''
     if (!username.value) {
       const profile = { username: null, avatarSeed: avatarSeed.value }
       pendingSession.value = { address: savedAddress, token, authType: authType.value, walletName: walletName.value, walletType: walletType.value, network: network.value, profile, profileAvailable: false }
@@ -466,14 +490,6 @@ async function restoreWalletSession() {
   }
   try {
     const profile = await fetchAuthProfile(token)
-    address.value = savedAddress
-    walletName.value = metadata.walletName || 'Phantom'
-    walletType.value = metadata.walletType || 'solana'
-    network.value = metadata.network || 'Solana'
-    authType.value = metadata.authType || 'wallet'
-    sessionToken.value = token
-    const localProfile = readLocalWalletProfile(savedAddress)
-    profileAvatarData.value = localProfile?.avatarDataUrl || ''
     username.value = profile.username || localProfile?.username || ''
     avatarSeed.value = profile.avatarSeed
     trackedWalletAddress.value = profile.trackedWalletAddress || ''
@@ -492,8 +508,8 @@ async function restoreWalletSession() {
     }
     if (walletType.value === 'solana') void refreshSolBalance(token)
     emit('wallet-session', { address: savedAddress, token, authType: authType.value, username: username.value, avatarSeed: profile.avatarSeed })
-  } catch {
-    clearConnection()
+  } catch (error) {
+    errorMessage.value = readableError(error)
   }
 }
 
@@ -512,9 +528,9 @@ async function completeSignIn(session: PendingSession) {
   profileAvatarData.value = localProfile?.avatarDataUrl || ''
   username.value = session.profile.username || localProfile?.username || ''
   trackedWalletAddress.value = session.profile.trackedWalletAddress || ''
-  sessionStorage.setItem(walletSessionTokenKey, session.token)
-  sessionStorage.setItem(walletSessionAddressKey, session.address)
-  sessionStorage.setItem(walletSessionMetadataKey, JSON.stringify({
+  writeWalletSessionValue(walletSessionTokenKey, session.token)
+  writeWalletSessionValue(walletSessionAddressKey, session.address)
+  writeWalletSessionValue(walletSessionMetadataKey, JSON.stringify({
     authType: session.authType,
     walletName: session.walletName,
     walletType: session.walletType,
@@ -563,8 +579,8 @@ async function finishProfileSetup() {
           const message = error instanceof Error ? error.message : ''
           if (/already taken|already exists/i.test(message)) throw error
           profileStorageAvailable.value = false
-          const metadata = JSON.parse(sessionStorage.getItem(walletSessionMetadataKey) || '{}') as Record<string, unknown>
-          sessionStorage.setItem(walletSessionMetadataKey, JSON.stringify({ ...metadata, profileAvailable: false }))
+          const metadata = JSON.parse(readWalletSessionValue(walletSessionMetadataKey) || '{}') as Record<string, unknown>
+          writeWalletSessionValue(walletSessionMetadataKey, JSON.stringify({ ...metadata, profileAvailable: false }))
         }
       }
     } else {
