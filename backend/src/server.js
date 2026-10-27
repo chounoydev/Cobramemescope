@@ -2,6 +2,7 @@ import './env.js'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
+import { timingSafeEqual } from 'node:crypto'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pool } from './db.js'
@@ -23,8 +24,6 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 }
 
 const app = express()
-const port = Number(process.env.PORT) || 3001
-
 app.disable('x-powered-by')
 app.use(helmet())
 app.use(cors({
@@ -51,6 +50,32 @@ app.get('/api/health', async (_request, response) => {
     response.status(503).json({ status: 'error', database: 'unavailable' })
   }
 })
+app.get('/api/cron/account-deletions', async (request, response, next) => {
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) {
+    return response.status(503).json({ error: 'CRON_SECRET is not configured in the backend environment.' })
+  }
+  if (!process.env.DATABASE_URL) {
+    return response.status(503).json({ error: 'DATABASE_URL is not configured in the backend environment.' })
+  }
+
+  const authorization = request.get('authorization') || ''
+  const token = authorization.match(/^Bearer (.+)$/i)?.[1]
+  if (!token) return response.status(401).json({ error: 'A valid cron authorization header is required.' })
+
+  const tokenBuffer = Buffer.from(token)
+  const secretBuffer = Buffer.from(cronSecret)
+  if (tokenBuffer.length !== secretBuffer.length || !timingSafeEqual(tokenBuffer, secretBuffer)) {
+    return response.status(401).json({ error: 'A valid cron authorization header is required.' })
+  }
+
+  try {
+    const processed = await processScheduledAccountDeletions()
+    response.json({ status: 'ok', processed })
+  } catch (error) {
+    next(error)
+  }
+})
 app.use('/api/auth', authRoutes)
 app.use('/api/market', marketRoutes)
 app.use('/api/watchlist', watchlistRoutes)
@@ -61,7 +86,7 @@ app.use('/api/analytics', analyticsRoutes)
 app.use('/api/content', contentRoutes)
 app.use('/api/assistant', assistantRoutes)
 const frontendDistPath = fileURLToPath(new URL('../../frontend/dist/', import.meta.url))
-if (process.env.NODE_ENV === 'production' && existsSync(frontendDistPath)) {
+if (process.env.VERCEL !== '1' && process.env.NODE_ENV === 'production' && existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath))
   app.get('*', (request, response, next) => {
     if (request.path.startsWith('/api/')) return next()
@@ -85,27 +110,32 @@ app.use((error, _request, response, _next) => {
   response.status(500).json({ error: 'The request could not be completed.' })
 })
 
-const server = app.listen(port, () => console.log(`MemeScope API listening on http://localhost:${port}`))
-const accountDeletionInterval = setInterval(() => {
-  if (!process.env.DATABASE_URL) return
-  void processScheduledAccountDeletions().catch((error) => {
-    console.error('Scheduled account deletion processing failed:', error.message)
-  })
-}, 60_000)
-accountDeletionInterval.unref()
-if (process.env.DATABASE_URL) {
-  void processScheduledAccountDeletions().catch((error) => {
-    console.error('Initial scheduled account deletion processing failed:', error.message)
-  })
-}
+export default app
 
-async function shutdown() {
-  clearInterval(accountDeletionInterval)
-  server.close(async () => {
-    await pool.end()
-    process.exit(0)
-  })
-}
+if (process.env.VERCEL !== '1') {
+  const port = Number(process.env.PORT) || 3001
+  const server = app.listen(port, () => console.log(`MemeScope API listening on http://localhost:${port}`))
+  const accountDeletionInterval = setInterval(() => {
+    if (!process.env.DATABASE_URL) return
+    void processScheduledAccountDeletions().catch((error) => {
+      console.error('Scheduled account deletion processing failed:', error.message)
+    })
+  }, 60_000)
+  accountDeletionInterval.unref()
+  if (process.env.DATABASE_URL) {
+    void processScheduledAccountDeletions().catch((error) => {
+      console.error('Initial scheduled account deletion processing failed:', error.message)
+    })
+  }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+  async function shutdown() {
+    clearInterval(accountDeletionInterval)
+    server.close(async () => {
+      await pool.end()
+      process.exit(0)
+    })
+  }
+
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+}
