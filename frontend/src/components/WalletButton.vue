@@ -615,7 +615,7 @@ async function deleteAccount() {
     deletionScheduledAt.value = await deleteAuthAccount(sessionToken.value)
     deletePromptOpen.value = false
     deleteConfirmation.value = ''
-    emit('wallet-session', null)
+    await disconnectWallet()
   } catch (error) {
     errorMessage.value = readableError(error)
   } finally {
@@ -1031,6 +1031,8 @@ function solanaWalletName(provider: SolanaProvider) {
 
 async function disconnectWallet() {
   const solana = activeSolana
+  settingsMode.value = false
+  dialogOpen.value = false
   emit('wallet-signed-out')
   clearConnection()
   if (solana?.disconnect) await solana.disconnect().catch(() => undefined)
