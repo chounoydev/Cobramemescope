@@ -495,6 +495,16 @@ export function registerWithEmail(email: string, password: string, username: str
   return emailAuth('register', email, password, username, inviteCode)
 }
 
+export async function checkUsernameAvailability(username: string): Promise<boolean> {
+  const params = new URLSearchParams({ username })
+  const response = await fetch(`${apiBaseUrl}/api/auth/username-availability?${params}`, { cache: 'no-store' })
+  const payload = await readApiResponse<{ available?: boolean; error?: string }>(response, 'Could not check username availability.')
+  if (!response.ok || typeof payload.available !== 'boolean') {
+    throw new Error(payload.error || 'Could not check username availability.')
+  }
+  return payload.available
+}
+
 export async function fetchAuthProfile(token: string): Promise<AuthProfile> {
   const response = await fetch(`${apiBaseUrl}/api/auth/profile`, {
     headers: { Authorization: `Bearer ${token}` },

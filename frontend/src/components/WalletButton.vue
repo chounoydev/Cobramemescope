@@ -7,6 +7,7 @@ import WalletHoldings from './WalletHoldings.vue'
 import bs58 from 'bs58'
 import nacl from 'tweetnacl'
 import {
+  checkUsernameAvailability,
   fetchAuthProfile,
   fetchReferralStats,
   fetchWalletBalance,
@@ -143,11 +144,13 @@ const emailAddress = ref('')
 const emailPassword = ref('')
 const confirmPassword = ref('')
 const emailMode = ref<'signin' | 'signup'>('signup')
+const usernameAvailability = ref<'idle' | 'checking' | 'available' | 'taken' | 'unavailable'>('idle')
 const emailBusy = ref(false)
 const moreWallets = ref(false)
 const recentWalletKeys = ref<string[]>([])
 const providerRefreshVersion = ref(0)
 const pendingSession = ref<PendingSession | null>(null)
+let usernameAvailabilityRequest = 0
 
 const walletSessionTokenKey = 'memescope-wallet-token'
 const walletSessionAddressKey = 'memescope-wallet-address'
@@ -851,8 +854,10 @@ async function connectSolana(provider: SolanaProvider, name: string) {
 async function finishEmailAuth() {
   if (emailBusy.value) return
   errorMessage.value = ''
+  let submittedUsername = ''
   if (emailMode.value === 'signup') {
-    if (!/^[A-Za-z0-9_]{3,24}$/.test(signupUsername.value.trim())) {
+    submittedUsername = signupUsername.value.trim()
+    if (!/^[A-Za-z0-9_]{3,24}$/.test(submittedUsername)) {
       errorMessage.value = 'Username must be 3–24 characters using letters, numbers, or underscores.'
       return
     }
@@ -863,6 +868,17 @@ async function finishEmailAuth() {
   }
   emailBusy.value = true
   try {
+    if (emailMode.value === 'signup' && usernameAvailability.value !== 'available') {
+      const available = await checkSignupUsername(submittedUsername)
+      if (submittedUsername !== signupUsername.value.trim()) {
+        errorMessage.value = 'Username changed while it was being checked. Please submit again.'
+        return
+      }
+      if (available === false) {
+        errorMessage.value = 'That username is already taken. Choose another one.'
+        return
+      }
+    }
     const result = emailMode.value === 'signup'
       ? await registerWithEmail(emailAddress.value, emailPassword.value, signupUsername.value.trim(), readReferralCode())
       : await loginWithEmail(emailAddress.value, emailPassword.value)
@@ -871,9 +887,41 @@ async function finishEmailAuth() {
     confirmPassword.value = ''
   } catch (error) {
     errorMessage.value = readableError(error)
+    if (emailMode.value === 'signup' && /username.*already taken/i.test(errorMessage.value)) {
+      usernameAvailability.value = 'taken'
+    }
   } finally {
     emailBusy.value = false
   }
+}
+
+function resetUsernameAvailability() {
+  usernameAvailabilityRequest++
+  usernameAvailability.value = 'idle'
+}
+
+async function checkSignupUsername(username = signupUsername.value.trim()): Promise<boolean | null> {
+  if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
+    usernameAvailability.value = 'idle'
+    return false
+  }
+  const request = ++usernameAvailabilityRequest
+  usernameAvailability.value = 'checking'
+  try {
+    const available = await checkUsernameAvailability(username)
+    if (request !== usernameAvailabilityRequest || username !== signupUsername.value.trim()) return null
+    usernameAvailability.value = available ? 'available' : 'taken'
+    return available
+  } catch {
+    if (request !== usernameAvailabilityRequest || username !== signupUsername.value.trim()) return null
+    usernameAvailability.value = 'unavailable'
+    return null
+  }
+}
+
+function toggleEmailMode() {
+  emailMode.value = emailMode.value === 'signin' ? 'signup' : 'signin'
+  resetUsernameAvailability()
 }
 
 function openConnectDialog() {
@@ -882,6 +930,7 @@ function openConnectDialog() {
   settingsMode.value = Boolean(deletionScheduledAt.value)
   errorMessage.value = ''
   requestInjectedWallets()
+  if (address.value && !deletionScheduledAt.value) void loadReferralStats()
 }
 
 function handleOpenLoginRequest() {
@@ -1250,20 +1299,20 @@ onBeforeUnmount(() => {
           <div class="connected-details"><strong>{{ username || walletName }}</strong><span>{{ walletName }} · {{ network }}</span></div>
           <span class="address-short">{{ walletType ? shortenedAddress : '' }}</span>
         </div>
-        <div v-if="walletType" class="full-address">{{ address }}</div>
         <section v-if="!deletionScheduledAt" class="invite-preference" aria-labelledby="invite-link-title">
           <div class="invite-preference-heading">
-            <div><strong id="invite-link-title">Invite friends</strong><small>Share your personal link. New users who sign up through it are counted here.</small></div>
+            <div><span class="invite-eyebrow">YOUR PROFILE LINK</span><strong id="invite-link-title">Invite friends</strong><small>Share your unique link and track successful sign-ups.</small></div>
             <span class="invite-count"><strong>{{ invitedCount }}</strong><small>INVITED</small></span>
           </div>
           <div class="invite-link-row">
-            <input :value="inviteLoading ? 'Loading your invite link…' : inviteLink" aria-label="Your personal invite link" readonly />
+            <input :value="inviteLoading ? 'Loading your invite link…' : inviteLink || (inviteError ? 'Invite link could not be loaded' : 'Preparing your invite link…')" aria-label="Your personal invite link" readonly />
             <button type="button" :disabled="inviteLoading || !inviteLink" @click="copyInviteLink">{{ inviteLoading ? 'LOADING…' : 'COPY LINK' }}</button>
           </div>
           <button v-if="inviteError && !inviteCode" type="button" class="invite-retry" :disabled="inviteLoading" @click="loadReferralStats">RETRY LOADING INVITE LINK</button>
           <p v-if="inviteError" class="invite-message invite-error" role="alert">{{ inviteError }}</p>
           <p v-else-if="inviteNotice" class="invite-message invite-success" role="status">{{ inviteNotice }}</p>
         </section>
+        <div v-if="walletType" class="full-address">{{ address }}</div>
         <section v-if="authType === 'email'" class="tracked-wallet-form">
           <div class="tracked-wallet-heading">
             <div><label>OWNER WALLET</label><p>Link your wallet to view meme-token balances across Solana and supported EVM networks.</p></div>
@@ -1300,21 +1349,29 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <p class="dialog-description">{{ emailMode === 'signup' ? 'Create an account to start tracking markets.' : 'Sign in to continue to your account.' }}</p>
+        <div class="auth-form-intro">
+          <span class="auth-form-mark" aria-hidden="true">{{ emailMode === 'signup' ? '+' : '↗' }}</span>
+          <div><strong>{{ emailMode === 'signup' ? 'Start with your email' : 'Continue with your email' }}</strong><small>{{ emailMode === 'signup' ? 'Your account keeps your watchlist and profile in sync.' : 'Your account is protected by your password.' }}</small></div>
+        </div>
         <form class="email-form" @submit.prevent="finishEmailAuth">
           <template v-if="emailMode === 'signup'">
             <label for="signup-username">USERNAME</label>
-            <input id="signup-username" v-model="signupUsername" type="text" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" autocomplete="username" placeholder="Choose a username" required />
+            <input id="signup-username" v-model="signupUsername" type="text" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="Choose a username" :aria-invalid="usernameAvailability === 'taken'" :aria-describedby="usernameAvailability === 'idle' ? 'signup-username-help' : 'signup-username-help signup-username-status'" required @input="resetUsernameAvailability" @blur="checkSignupUsername()" />
+            <small id="signup-username-help" class="auth-field-help">3–24 letters, numbers, or underscores. Usernames are unique, including capitalization.</small>
+            <small v-if="usernameAvailability !== 'idle'" id="signup-username-status" class="username-availability" :class="`is-${usernameAvailability}`" role="status">
+              {{ usernameAvailability === 'checking' ? 'Checking username…' : usernameAvailability === 'available' ? 'Username is available.' : usernameAvailability === 'taken' ? 'That username is already taken.' : 'Could not check right now. We’ll confirm when you create your account.' }}
+            </small>
           </template>
           <label for="email-address">EMAIL ADDRESS</label>
-          <input id="email-address" v-model="emailAddress" type="email" autocomplete="email" placeholder="you@example.com" required />
+          <input id="email-address" v-model="emailAddress" type="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required />
           <label for="email-password">PASSWORD</label>
           <input id="email-password" v-model="emailPassword" type="password" :autocomplete="emailMode === 'signup' ? 'new-password' : 'current-password'" minlength="10" maxlength="128" placeholder="At least 10 characters" required />
           <template v-if="emailMode === 'signup'">
             <label for="confirm-password">CONFIRM PASSWORD</label>
             <input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Enter your password again" required />
           </template>
-          <button class="email-submit" type="submit" :disabled="emailBusy">{{ emailBusy ? 'Please wait…' : emailMode === 'signup' ? 'Create account' : 'Sign in' }}</button>
-          <button class="email-mode" type="button" @click="emailMode = emailMode === 'signin' ? 'signup' : 'signin'">{{ emailMode === 'signin' ? 'New to Cobra MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
+          <button class="email-submit" type="submit" :disabled="emailBusy"><span>{{ emailBusy ? 'Please wait…' : emailMode === 'signup' ? 'Create account' : 'Sign in' }}</span><span aria-hidden="true">{{ emailBusy ? '◌' : '→' }}</span></button>
+          <button class="email-mode" type="button" @click="toggleEmailMode">{{ emailMode === 'signin' ? 'New to Cobra MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
         </form>
 
         <p class="account-note">Your email account and a connected crypto wallet are separate sign-in methods.</p>
@@ -1367,17 +1424,19 @@ onBeforeUnmount(() => {
 .settings-profile .connected-details { min-width: 0; }
 .settings-profile .connected-details span { overflow-wrap: anywhere; }
 .settings-profile .secondary-action { max-width: 112px; }
-.invite-preference { display: grid; gap: 10px; margin-top: 14px; padding: 13px; border: 1px solid #3b4736; border-radius: 10px; background: linear-gradient(120deg, #202a1e, #171e18); }
+.invite-preference { display: grid; gap: 10px; margin-top: 15px; padding: 14px; border: 1px solid #46573d; border-radius: 12px; background: linear-gradient(125deg, #222e20, #171f19 72%); box-shadow: inset 3px 0 #a9cc5b; }
 .invite-preference-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .invite-preference-heading > div { display: grid; gap: 4px; }
-.invite-preference-heading > div > strong { color: #e6efd9; font-size: 12px; }
-.invite-preference-heading > div > small { color: #a8b399; font-size: 10px; line-height: 1.5; }
+.invite-eyebrow { color: #a9cc5b; font-size: 8px; font-weight: 850; letter-spacing: .12em; }
+.invite-preference-heading > div > strong { color: #edf4e5; font-size: 14px; }
+.invite-preference-heading > div > small { color: #b0bba7; font-size: 10px; line-height: 1.5; }
 .invite-count { display: grid; min-width: 55px; justify-items: center; gap: 2px; padding: 6px 9px; border: 1px solid #3b4736; border-radius: 9px; background: #202820; }
 .invite-count strong { color: #c7eb6c; font-size: 17px; }
 .invite-count small { color: #a8b399; font-size: 7px; font-weight: 800; letter-spacing: .08em; }
 .invite-link-row { display: flex; min-width: 0; gap: 7px; }
-.invite-link-row input { width: 100%; min-width: 0; height: 38px; padding: 0 9px; border: 1px solid #3b4438; border-radius: 7px; outline: 0; background: #151a16; color: #d7e4c8; font: 10px 'DM Sans', sans-serif; }
-.invite-link-row button,.invite-retry { min-height: 38px; flex: 0 0 auto; padding: 0 10px; border: 1px solid #46533c; border-radius: 7px; background: #263222; color: #d9e6c2; font: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
+.invite-link-row input { width: 100%; min-width: 0; height: 40px; padding: 0 10px; border: 1px solid #414c3c; border-radius: 8px; outline: 0; background: #141a16; color: #d7e4c8; font: 10px 'DM Sans', sans-serif; }
+.invite-link-row button,.invite-retry { min-height: 40px; flex: 0 0 auto; padding: 0 11px; border: 1px solid #607844; border-radius: 8px; background: #35472b; color: #e5f2d1; font: inherit; font-size: 9px; font-weight: 850; cursor: pointer; transition: background .16s ease, border-color .16s ease; }
+.invite-link-row button:hover:not(:disabled),.invite-retry:hover:not(:disabled) { border-color: #9cbe5b; background: #405533; }
 .invite-link-row button:disabled,.invite-retry:disabled { cursor: wait; opacity: .6; }
 .invite-retry { justify-self: start; min-height: 30px; }
 .invite-message { margin: 0; font-size: 10px; line-height: 1.5; }
@@ -1407,7 +1466,7 @@ onBeforeUnmount(() => {
 .delete-confirm-form input:focus { border-color: #d67878; }
 .delete-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .delete-confirm-actions .secondary-action { flex: 0 1 100px; }
-.dialog-description { margin: 8px 0 18px; color: #a5a5a5; font-size: 14px; }
+.dialog-description { margin: 8px 0 14px; color: #b0b8ae; font-size: 13px; line-height: 1.55; }
 .email-submit,.profile-submit { width: 100%; min-height: 44px; border: 0; border-radius: 10px; font: inherit; font-weight: 750; cursor: pointer; }
 .tracked-wallet-form { display: grid; gap: 9px; margin-top: 14px; padding: 13px; border: 1px solid #363e35; border-radius: 11px; background: #171d18; }
 .tracked-wallet-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -1432,13 +1491,30 @@ onBeforeUnmount(() => {
 .tracked-wallet-cancel { justify-self: start; }
 .tracking-wallet-status { color: #a9d77b; font-size: 10px; line-height: 1.4; }
 .setup-note { margin: 5px 0; color: #9c9c9c; font-size: 12px; text-align: center; }
-.email-form { display: grid; gap: 9px; margin-top: 17px; }
-.email-form label,.profile-form label { margin-top: 4px; color: #a3a3a3; font-size: 10px; font-weight: 800; letter-spacing: .1em; }
-.email-form input,.profile-form input { width: 100%; min-height: 44px; box-sizing: border-box; padding: 0 13px; border: 1px solid #373737; border-radius: 9px; outline: none; background: #191919; color: #f5f5f5; font: inherit; }
-.email-form input:focus,.profile-form input:focus { border-color: #b5d95a; }
-.email-submit,.profile-submit { margin-top: 4px; background: #c7eb6c; color: #15180d; }
+.auth-form-intro { display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid #35443a; border-radius: 11px; background: linear-gradient(110deg, #1a2823, #17201c); }
+.auth-form-mark { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border: 1px solid #455b40; border-radius: 10px; background: #263627; color: #c7eb6c; font-size: 19px; font-weight: 800; }
+.auth-form-intro > div { display: grid; gap: 3px; }
+.auth-form-intro strong { color: #e8eee4; font-size: 12px; }
+.auth-form-intro small { color: #a4b0a3; font-size: 10px; line-height: 1.4; }
+.email-form { display: grid; gap: 8px; margin-top: 14px; }
+.email-form label,.profile-form label { margin-top: 5px; color: #b7c2b1; font-size: 9px; font-weight: 850; letter-spacing: .11em; }
+.email-form input,.profile-form input { width: 100%; min-height: 47px; box-sizing: border-box; padding: 0 13px; border: 1px solid #354137; border-radius: 10px; outline: none; background: #141a16; color: #f1f5ee; font: inherit; font-size: 13px; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+.email-form input::placeholder,.profile-form input::placeholder { color: #778276; }
+.email-form input:hover,.profile-form input:hover { border-color: #51614a; }
+.email-form input:focus,.profile-form input:focus { border-color: #a8cb5c; background: #171f19; box-shadow: 0 0 0 3px rgb(168 203 92 / 14%); }
+.email-form input[aria-invalid="true"] { border-color: #c76f66; }
+.auth-field-help,.username-availability { margin-top: -3px; color: #a4b0a3; font-size: 10px; line-height: 1.45; }
+.username-availability.is-checking { color: #b8c5ac; }
+.username-availability.is-available { color: #b7d98f; }
+.username-availability.is-taken { color: #f0a79d; }
+.username-availability.is-unavailable { color: #dfc98f; }
+.email-submit,.profile-submit { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; padding: 0 15px; background: linear-gradient(110deg, #c7eb6c, #b6dc65); color: #172012; box-shadow: 0 5px 16px rgb(162 198 82 / 12%); transition: transform .16s ease, filter .16s ease; }
+.email-submit:hover:not(:disabled),.profile-submit:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+.email-submit > span:first-child { font-size: 13px; }
+.email-submit > span:last-child { font-size: 18px; }
 .email-submit:disabled,.profile-submit:disabled,.wallet-choice:disabled { opacity: .6; cursor: wait; }
-.email-mode { padding: 3px; border: 0; background: transparent; color: #c7eb6c; font: inherit; font-size: 12px; cursor: pointer; }
+.email-mode { min-height: 42px; padding: 0 10px; border: 1px solid #354137; border-radius: 9px; background: #19211b; color: #d2e5ad; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+.email-mode:hover { border-color: #697f4b; background: #202b21; }
 .account-note { margin: 13px 0 16px; color: #959595; font-size: 12px; line-height: 1.55; }
 .wallet-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 11px; color: #8b8b8b; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
 .wallet-divider::before,.wallet-divider::after { height: 1px; flex: 1; background: #303030; content: ''; }
@@ -1446,8 +1522,8 @@ onBeforeUnmount(() => {
 .wallet-choice-wrap { display: grid; gap: 3px; }
 .wallet-install-link { justify-self: end; padding: 0 9px 4px; color: #c7eb6c; font-size: 10px; text-decoration: none; }
 .wallet-install-link:hover { text-decoration: underline; }
-.wallet-choice { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 58px; padding: 9px 11px; border: 1px solid #303030; border-radius: 11px; background: #171717; color: #f1f1f1; font: inherit; text-align: left; cursor: pointer; }
-.wallet-choice:hover:not(:disabled) { border-color: #8ba742; background: #1d2116; }
+.wallet-choice { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 58px; padding: 9px 11px; border: 1px solid #303a31; border-radius: 11px; background: #171e19; color: #f1f5ee; font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.wallet-choice:hover:not(:disabled) { border-color: #8ba742; background: #1d2116; transform: translateY(-1px); }
 .wallet-choice > span:nth-child(2) { display: grid; flex: 1; gap: 3px; font-size: 13px; font-weight: 700; }
 .wallet-choice small { color: #999; font-size: 10px; font-weight: 500; }
 .wallet-choice-icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 10px; font-size: 15px; font-weight: 800; }
@@ -1476,6 +1552,18 @@ onBeforeUnmount(() => {
 .profile-preview span { display: grid; gap: 4px; }
 .profile-preview small,.profile-form small { color: #999; font-size: 11px; }
 .profile-form { display: grid; gap: 9px; }
-.wallet-error { margin: 12px 0 0; color: #ff9898; font-size: 12px; line-height: 1.5; }
-@media (max-width: 480px) { .wallet-backdrop { align-items: end; padding: 0; } .wallet-dialog { width: 100%; max-height: 91dvh; padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; } .dialog-header h2 { font-size: 24px; } }
+.wallet-error { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #633b36; border-radius: 9px; background: #281c1a; color: #ffb6a9; font-size: 12px; line-height: 1.5; }
+.wallet-dialog button:focus-visible,.wallet-dialog input:focus-visible,.wallet-dialog select:focus-visible { outline: 2px solid #a8cb5c; outline-offset: 2px; }
+@media (max-width: 480px) {
+  .wallet-backdrop { align-items: end; padding: 0; }
+  .wallet-dialog { width: 100%; max-height: 92dvh; padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
+  .dialog-header h2 { font-size: 24px; }
+  .invite-preference { padding: 12px; }
+  .invite-link-row { align-items: stretch; }
+  .invite-link-row input { font-size: 9px; }
+  .invite-link-row button { padding: 0 9px; font-size: 8px; }
+  .auth-form-intro { padding: 11px; }
+  .account-note { font-size: 11px; }
+  .wallet-divider { margin: 12px 0 10px; }
+}
 </style>

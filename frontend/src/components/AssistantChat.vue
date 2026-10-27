@@ -165,7 +165,14 @@ function handleComposerKeydown(event: KeyboardEvent) {
 .assistant-error { align-self: stretch; margin: 0 2px; padding: 9px 10px; border: 1px solid rgba(255, 125, 125, .3); border-radius: 9px; background: rgba(113, 37, 37, .22); color: #ffb0a8; font-size: 11px; line-height: 1.5; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 @keyframes assistant-pulse { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
-@media (max-width: 760px) { .assistant-chat { bottom: calc(84px + env(safe-area-inset-bottom)); } }
-@media (max-width: 480px) { .assistant-chat { right: 14px; } .assistant-panel { width: calc(100vw - 28px); height: min(620px, calc(100dvh - 85px)); } }
+@media (max-width: 760px) {
+  .assistant-chat { right: max(14px, env(safe-area-inset-right)); bottom: calc(82px + env(safe-area-inset-bottom)); }
+  .assistant-launcher { width: 52px; min-height: 52px; padding: 0; border-radius: 50%; }
+  .assistant-launcher span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+}
+@media (max-width: 480px) {
+  .assistant-chat { right: max(12px, env(safe-area-inset-right)); }
+  .assistant-panel { width: calc(100vw - 24px); height: min(620px, calc(100dvh - 112px - env(safe-area-inset-bottom))); }
+}
 @media (prefers-reduced-motion: reduce) { .assistant-loading i { animation: none; } }
 </style>

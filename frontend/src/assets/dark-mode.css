@@ -3052,6 +3052,14 @@
   color: #f0a79d;
 }
 
+@media (max-width: 760px) {
+  .dark-mode .scanner-main .scanner-top-actions .donate-trigger {
+    border-color: #3a493a;
+    background: #202b21;
+    color: #dce8c8;
+  }
+}
+
 :root.dark-mode .admin-primary {
   background: #b4cf7a;
   color: #172014;

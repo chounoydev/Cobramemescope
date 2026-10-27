@@ -11,7 +11,11 @@ const emit = defineEmits<{
   scan: [address: string]
 }>()
 
+type ChartPoint = TrendingMemecoinDetails['chart']['points'][number]
+type LivePriceSample = { timestamp: number; priceUsd: number }
+
 const details = ref<TrendingMemecoinDetails | null>(null)
+const livePriceSamples = ref<LivePriceSample[]>([])
 const loading = ref(false)
 const error = ref('')
 const priceUpdateError = ref('')
@@ -39,19 +43,97 @@ const chartIntervals: { value: MarketChartInterval; label: string }[] = [
 ]
 let activeRequest: AbortController | null = null
 let pricePulseTimer: number | undefined
+let activeTokenKey: string | null = null
+
+const chartIntervalSeconds: Record<MarketChartInterval, number> = {
+  '1m': 60,
+  '5m': 300,
+  '1h': 3600,
+  '2h': 7200,
+  '3h': 10800,
+  '5h': 18000,
+  '8h': 28800,
+  '1d': 86400,
+  '1mo': 2_592_000,
+}
+
+function addLivePriceSample(price: number | null | undefined, timestamp = Date.now()) {
+  if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return
+  livePriceSamples.value = [...livePriceSamples.value, { timestamp, priceUsd: price }].slice(-2_000)
+}
+
+function intervalBucket(timestamp: number, interval: MarketChartInterval) {
+  if (interval === '1mo') {
+    const date = new Date(timestamp)
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)
+  }
+  const bucketMs = chartIntervalSeconds[interval] * 1000
+  return Math.floor(timestamp / bucketMs) * bucketMs
+}
+
+function aggregateLiveSamples(samples: LivePriceSample[], interval: MarketChartInterval): ChartPoint[] {
+  const candles = new Map<number, ChartPoint>()
+  for (const sample of samples) {
+    const timestamp = intervalBucket(sample.timestamp, interval)
+    const candle = candles.get(timestamp)
+    if (candle) {
+      candle.high = Math.max(candle.high, sample.priceUsd)
+      candle.low = Math.min(candle.low, sample.priceUsd)
+      candle.close = sample.priceUsd
+      candle.priceUsd = sample.priceUsd
+    } else {
+      candles.set(timestamp, {
+        timestamp,
+        open: sample.priceUsd,
+        high: sample.priceUsd,
+        low: sample.priceUsd,
+        close: sample.priceUsd,
+        priceUsd: sample.priceUsd,
+        volumeUsd: 0,
+      })
+    }
+  }
+  return [...candles.values()].sort((left, right) => left.timestamp - right.timestamp)
+}
+
+function mergeLiveSamples(historical: ChartPoint[], observed: ChartPoint[]) {
+  const candles = new Map(historical.map((point) => [point.timestamp, { ...point }]))
+  for (const sample of observed) {
+    const candle = candles.get(sample.timestamp)
+    if (candle) {
+      candle.high = Math.max(candle.high, sample.high)
+      candle.low = Math.min(candle.low, sample.low)
+      candle.close = sample.close
+      candle.priceUsd = sample.close
+    } else {
+      candles.set(sample.timestamp, sample)
+    }
+  }
+  return [...candles.values()].sort((left, right) => left.timestamp - right.timestamp)
+}
 
 watch(() => [props.coin && `${props.coin.chainId}:${props.coin.address}`, selectedInterval.value] as const, async ([key, interval], _previous, onCleanup) => {
   activeRequest?.abort()
+  const isNewToken = key !== activeTokenKey
+  if (isNewToken) {
+    activeTokenKey = key
+    livePriceSamples.value = []
+    addLivePriceSample(props.coin?.priceUsd)
+    visibleCandleCount.value = Math.max(1, Math.min(24, livePriceSamples.value.length))
+    panOffset.value = 0
+  }
   if (key !== holderCountCacheKey) {
     holderCountCacheKey = key
     cachedHolderCount.value = null
     cachedHolderCountSource.value = null
   }
-  details.value = null
+  if (isNewToken) details.value = null
   error.value = ''
   priceUpdateError.value = ''
-  pricePulse.value = ''
-  copied.value = false
+  if (isNewToken) {
+    pricePulse.value = ''
+    copied.value = false
+  }
   if (!key || !props.coin) {
     loading.value = false
     return
@@ -69,19 +151,23 @@ watch(() => [props.coin && `${props.coin.chainId}:${props.coin.address}`, select
   const refreshDetails = async (initial: boolean) => {
     if (refreshInFlight || controller.signal.aborted || !props.coin) return
     refreshInFlight = true
-    if (initial) loading.value = true
+    if (initial && isNewToken) loading.value = true
     try {
       const latest = await fetchTrendingMemecoinDetails(props.coin.chainId, props.coin.address, interval, controller.signal)
       if (controller.signal.aborted) return
       const previousPrice = details.value?.market.priceUsd
       const latestPrice = latest.market.priceUsd
-      const latestDetails = !initial && !latest.chart.points.length && details.value?.chart.points.length
+      const latestDetails = !latest.chart.points.length
+        && details.value?.chart.interval === interval
+        && details.value.chart.points.length
         ? { ...latest, chart: details.value.chart }
         : latest
       details.value = latestDetails
+      error.value = ''
+      addLivePriceSample(latest.market.priceUsd)
       priceUpdateError.value = ''
-      if (initial) {
-        visibleCandleCount.value = Math.min(24, latestDetails.chart.points.length)
+      if (initial && isNewToken) {
+        visibleCandleCount.value = Math.max(1, Math.min(24, points.value.length))
         panOffset.value = 0
       }
       if (latest.market.holderCount !== null) {
@@ -102,10 +188,11 @@ watch(() => [props.coin && `${props.coin.chainId}:${props.coin.address}`, select
       }
     } finally {
       refreshInFlight = false
-      if (initial && !controller.signal.aborted) loading.value = false
+      if (initial && isNewToken && !controller.signal.aborted) loading.value = false
     }
   }
 
+  loading.value = isNewToken
   await refreshDetails(true)
   if (!controller.signal.aborted) {
     refreshTimer = window.setInterval(() => { void refreshDetails(false) }, 15_000)
@@ -117,7 +204,10 @@ onUnmounted(() => {
   if (pricePulseTimer !== undefined) window.clearTimeout(pricePulseTimer)
 })
 
-const points = computed(() => details.value?.chart.points || [])
+const historicalPoints = computed(() => details.value?.chart.interval === selectedInterval.value ? details.value.chart.points : [])
+const observedPoints = computed(() => aggregateLiveSamples(livePriceSamples.value, selectedInterval.value))
+const hasHistoricalChart = computed(() => historicalPoints.value.length > 0)
+const points = computed(() => mergeLiveSamples(historicalPoints.value, observedPoints.value))
 const listings = computed(() => details.value?.listings || [])
 const selectedIntervalLabel = computed(() => chartIntervals.find((item) => item.value === selectedInterval.value)?.label || selectedInterval.value.toUpperCase())
 const visiblePoints = computed(() => {
@@ -128,15 +218,21 @@ const maximumPanOffset = computed(() => Math.max(0, points.value.length - visibl
 const canZoomIn = computed(() => visibleCandleCount.value > Math.min(6, points.value.length))
 const canZoomOut = computed(() => visibleCandleCount.value < points.value.length)
 const isDefaultView = computed(() => panOffset.value === 0 && visibleCandleCount.value === Math.min(24, points.value.length))
+const chartPriceDomain = computed(() => {
+  if (!visiblePoints.value.length) return { min: 0, max: 1 }
+  const low = Math.min(...visiblePoints.value.map((point) => point.low))
+  const high = Math.max(...visiblePoints.value.map((point) => point.high))
+  const padding = (high - low) || Math.max(Math.abs(high) * 0.01, Number.EPSILON)
+  return { min: low - padding * 0.05, max: high + padding * 0.05 }
+})
 const chartCoordinates = computed(() => {
   if (!visiblePoints.value.length) return []
-  const min = Math.min(...visiblePoints.value.map((point) => point.low))
-  const max = Math.max(...visiblePoints.value.map((point) => point.high))
-  const spread = max - min || Math.max(max * 0.01, Number.EPSILON)
+  const { min, max } = chartPriceDomain.value
+  const spread = max - min
   const maxVolume = Math.max(...visiblePoints.value.map((point) => point.volumeUsd), 0)
   return visiblePoints.value.map((point, index) => ({
     ...point,
-    x: 36 + (index / Math.max(visiblePoints.value.length - 1, 1)) * 594,
+    x: visiblePoints.value.length === 1 ? 630 : 36 + (index / (visiblePoints.value.length - 1)) * 594,
     openY: 18 + ((max - point.open) / spread) * 128,
     highY: 18 + ((max - point.high) / spread) * 128,
     lowY: 18 + ((max - point.low) / spread) * 128,
@@ -151,8 +247,7 @@ const chartCoordinates = computed(() => {
 const candleWidth = computed(() => Math.min(18, Math.max(4, (594 / Math.max(chartCoordinates.value.length, 1)) * 0.62)))
 const priceGridLabels = computed(() => {
   if (!visiblePoints.value.length) return []
-  const min = Math.min(...visiblePoints.value.map((point) => point.low))
-  const max = Math.max(...visiblePoints.value.map((point) => point.high))
+  const { min, max } = chartPriceDomain.value
   return [0, 1, 2, 3, 4].map((index) => ({
     y: 18 + index * 32,
     price: max - ((max - min) * index) / 4,
@@ -163,11 +258,18 @@ const firstVisiblePoint = computed(() => visiblePoints.value[0])
 const middleVisiblePoint = computed(() => visiblePoints.value[Math.floor(visiblePoints.value.length / 2)])
 const lastVisiblePoint = computed(() => visiblePoints.value[visiblePoints.value.length - 1])
 const lineIsUp = computed(() => (visiblePoints.value.at(-1)?.close ?? 0) >= (visiblePoints.value[0]?.close ?? 0))
-const linePath = computed(() => chartCoordinates.value.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.closeY}`).join(' '))
+const linePath = computed(() => {
+  if (chartCoordinates.value.length === 1) {
+    const point = chartCoordinates.value[0]!
+    return `M 36 ${point.closeY} L 630 ${point.closeY}`
+  }
+  return chartCoordinates.value.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.closeY}`).join(' ')
+})
 const lineAreaPath = computed(() => {
   if (chartCoordinates.value.length === 0) return ''
   const first = chartCoordinates.value[0]!
   const last = chartCoordinates.value[chartCoordinates.value.length - 1]!
+  if (chartCoordinates.value.length === 1) return `${linePath.value} L 630 146 L 36 146 Z`
   return `${linePath.value} L ${last.x} 146 L ${first.x} 146 Z`
 })
 const change24h = computed(() => details.value?.market.change24h ?? props.coin?.change24h ?? null)
@@ -230,7 +332,7 @@ function zoomOut() {
 }
 
 function resetChartView() {
-  visibleCandleCount.value = Math.min(24, points.value.length)
+  visibleCandleCount.value = Math.max(1, Math.min(24, points.value.length))
   panOffset.value = 0
 }
 
@@ -303,13 +405,11 @@ function reviewContract() {
         </header>
 
         <div class="detail-body">
-          <div v-if="loading" class="detail-loading" role="status"><span class="detail-spinner"></span><span>Loading live market data</span></div>
-          <p v-else-if="error" class="detail-error" role="alert">{{ error }}</p>
-          <template v-else>
-            <div class="detail-dashboard">
+          <p v-if="error" class="detail-error" role="alert">{{ error }}</p>
+          <div class="detail-dashboard">
               <div class="detail-primary">
                 <section class="price-chart-section" aria-label="Live price chart">
-                  <div class="chart-heading"><div><span>{{ selectedCurrency }} PRICE · {{ selectedIntervalLabel }}</span><small class="price-live-status" :class="{ delayed: priceUpdateError }" role="status">{{ priceUpdateError ? 'LIVE UPDATE DELAYED' : `LIVE · ${selectedIntervalLabel} ${chartStyle === 'candles' ? 'CANDLES' : 'LINE'}` }}</small><strong class="chart-price" :class="pricePulse" aria-live="polite">{{ formatPrice(details?.market.priceUsd ?? coin.priceUsd) }}</strong></div><span v-if="change24h !== null" class="chart-change" :class="isPositive ? 'change-positive' : 'change-negative'">{{ isPositive ? '+' : '' }}{{ change24h.toFixed(2) }}%</span></div>
+                  <div class="chart-heading"><div><span>{{ selectedCurrency }} PRICE · {{ selectedIntervalLabel }}</span><small class="price-live-status" :class="{ delayed: priceUpdateError || error }" role="status">{{ priceUpdateError || error ? 'LIVE UPDATE DELAYED' : loading ? 'CONNECTING TO LIVE PRICE' : `LIVE · ${selectedIntervalLabel} ${chartStyle === 'candles' ? 'CANDLES' : 'LINE'}` }}</small><strong class="chart-price" :class="pricePulse" aria-live="polite">{{ formatPrice(details?.market.priceUsd ?? coin.priceUsd) }}</strong></div><span v-if="change24h !== null" class="chart-change" :class="isPositive ? 'change-positive' : 'change-negative'">{{ isPositive ? '+' : '' }}{{ change24h.toFixed(2) }}%</span></div>
                   <div class="chart-intervals" role="group" aria-label="Chart interval">
                     <button v-for="interval in chartIntervals" :key="interval.value" type="button" :class="{ active: selectedInterval === interval.value }" :aria-pressed="selectedInterval === interval.value" @click="selectedInterval = interval.value">{{ interval.label }}</button>
                   </div>
@@ -323,7 +423,8 @@ function reviewContract() {
                     <button type="button" aria-label="Zoom in" :disabled="!canZoomIn" @click="zoomIn">+</button>
                     <button type="button" :disabled="isDefaultView" @click="resetChartView">RESET</button>
                   </div>
-                  <div v-if="visiblePoints.length" class="price-chart" @wheel.prevent="handleChartWheel" @pointerdown="startChartPan" @pointermove="moveChartPan" @pointerup="stopChartPan" @pointercancel="stopChartPan">
+                  <p v-if="!hasHistoricalChart" class="chart-history-note">Historical candles are unavailable for this pool. This chart plots observed live prices as they update.</p>
+                  <div class="price-chart" @wheel.prevent="handleChartWheel" @pointerdown="startChartPan" @pointermove="moveChartPan" @pointerup="stopChartPan" @pointercancel="stopChartPan">
                     <svg viewBox="0 0 720 230" role="img" :aria-label="`${selectedIntervalLabel} ${chartStyle} price and volume chart for ${coin.name}. Use the mouse wheel to zoom and drag to pan.`" preserveAspectRatio="none">
                       <rect x="0" y="0" width="720" height="230" class="chart-background" />
                       <line v-for="line in priceGridLabels" :key="line.y" x1="8" :y1="line.y" x2="630" :y2="line.y" class="chart-gridline" />
@@ -350,11 +451,11 @@ function reviewContract() {
                       </g>
                       <rect v-if="currentPriceCoordinate" x="636" :y="currentPriceCoordinate.closeY - 9" width="82" height="18" rx="2" class="chart-current-price-tag" :class="currentPriceCoordinate.isBullish ? 'price-tag-up' : 'price-tag-down'" />
                       <text v-if="currentPriceCoordinate" x="642" :y="currentPriceCoordinate.closeY + 3" class="chart-current-price-text">{{ formatPrice(currentPriceCoordinate.close) }}</text>
+                      <text v-if="!visiblePoints.length" x="320" y="112" class="chart-waiting-label">Waiting for a valid live price…</text>
                     </svg>
-                    <div class="chart-axis"><span>{{ formatTime(firstVisiblePoint!.timestamp) }}</span><span>{{ formatTime(middleVisiblePoint!.timestamp) }}</span><span>{{ formatTime(lastVisiblePoint!.timestamp) }}</span></div>
+                    <div v-if="visiblePoints.length" class="chart-axis"><span>{{ formatTime(firstVisiblePoint!.timestamp) }}</span><span>{{ formatTime(middleVisiblePoint!.timestamp) }}</span><span>{{ formatTime(lastVisiblePoint!.timestamp) }}</span></div>
                   </div>
-                  <div v-else class="chart-empty">{{ loading ? 'Loading price history…' : 'Price history is unavailable for this pool.' }}</div>
-                  <small class="chart-source">{{ chartStyle === 'candles' ? 'OHLC candles' : 'Closing price' }} + volume · green up · red down · {{ details?.market.dex || coin.dex }} pool · GeckoTerminal</small>
+                  <small class="chart-source">{{ hasHistoricalChart ? `${chartStyle === 'candles' ? 'OHLC candles' : 'Closing price'} + live price updates · green up · red down · ${details?.market.dex || coin.dex} pool · GeckoTerminal` : `Live price observations · ${details?.market.dex || coin.dex} pool · DexScreener market feed` }}</small>
                 </section>
 
                 <div class="metrics-market-layout">
@@ -384,9 +485,7 @@ function reviewContract() {
 
                 <div class="detail-risk" :class="`risk-${coin.risk.level}`"><span>{{ coin.risk.level === 'danger' ? '×' : coin.risk.level === 'caution' ? '△' : coin.risk.level === 'clear' ? '✓' : '?' }}</span><div><strong>{{ coin.risk.label }}</strong><small>{{ coin.risk.reasons.join(' · ') || `${coin.risk.unknownCount} unknown checks` }}</small></div><button type="button" :disabled="coin.chainId === 'sui'" :title="coin.chainId === 'sui' ? 'Sui contract risk scanning is not available yet.' : 'Open full contract risk scan'" @click="reviewContract">{{ coin.chainId === 'sui' ? 'SUI CHECKS UNAVAILABLE' : 'OPEN FULL RISK SCAN ↗' }}</button></div>
               </div>
-
             </div>
-          </template>
         </div>
 
         <footer class="detail-footer">
@@ -405,6 +504,7 @@ function reviewContract() {
 .detail-body { padding: 19px 23px 20px; }.detail-dashboard { display: block; }.detail-primary { min-width: 0; }.metrics-market-layout { display: grid; grid-template-columns: minmax(0, 1fr) 275px; align-items: start; gap: 14px; margin-top: 14px; }.detail-loading { display: flex; min-height: 245px; align-items: center; justify-content: center; gap: 10px; color: #747d70; font-size: 12px; }.detail-spinner { width: 17px; height: 17px; border: 2px solid #dce4d3; border-top-color: #71864f; border-radius: 50%; animation: detail-spin .8s linear infinite; }.detail-error { padding: 35px 12px; color: #a64238; font-size: 12px; text-align: center; }
 .price-chart-section { padding: 16px 17px 12px; border: 1px solid #e2e7dd; background: #fafbf8; }.chart-heading { display: flex; align-items: flex-end; justify-content: space-between; }.chart-heading > div { display: grid; gap: 6px; }.chart-heading > div > span { color: #869080; font: 8px 'DM Mono', monospace; letter-spacing: .6px; }.chart-heading strong { color: #20271e; font: 700 24px Manrope, sans-serif; }.chart-price.price-up { animation: market-price-up 1.2s ease-in-out; }.chart-price.price-down { animation: market-price-down 1.2s ease-in-out; }.price-live-status { color: #467d49; font: 8px 'DM Mono', monospace; letter-spacing: .3px; }.price-live-status.delayed { color: #a3483f; }.chart-change { padding: 5px 8px; font: 10px 'DM Mono', monospace; }.change-positive { background: #edf4e6; color: #50763b; }.change-negative { background: #faece9; color: #a3483f; }.chart-intervals { display: flex; gap: 4px; overflow-x: auto; margin-top: 13px; padding-bottom: 3px; }.chart-intervals button { min-width: 38px; min-height: 27px; padding: 0 7px; border: 1px solid #e1e6dc; background: #fff; color: #7b8475; font: 8px 'DM Mono', monospace; }.chart-intervals button.active { border-color: #71864f; background: #edf4e6; color: #486a35; }.chart-controls { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 8px; color: #858d80; font: 8px 'DM Mono', monospace; }.chart-controls span { margin-right: auto; }.chart-controls button { min-width: 28px; height: 25px; padding: 0 7px; border: 1px solid #e1e6dc; background: #fff; color: #586252; font: 10px 'DM Mono', monospace; }.chart-controls button:last-child { font-size: 8px; }.chart-controls button:disabled { cursor: default; opacity: .45; }
 .price-chart { margin-top: 4px; overflow: hidden; border: 1px solid #272b30; background: #0d0f12; cursor: grab; touch-action: none; user-select: none; }.price-chart:active { cursor: grabbing; }.price-chart svg { display: block; width: 100%; height: 230px; }.chart-background { fill: #0d0f12; }.chart-gridline { stroke: #292d33; stroke-width: 1; }.chart-volume-divider { stroke: #30343a; stroke-width: 1; }.chart-price-axis,.chart-volume-label { fill: #969ba3; font: 10px 'DM Mono', monospace; }.chart-price-axis { text-anchor: start; }.chart-volume-label { font-size: 8px; letter-spacing: .5px; }.chart-current-price-line { stroke: #43cf82; stroke-dasharray: 4 4; stroke-width: 1; }.chart-current-price-tag.price-tag-up { fill: #27ae60; }.chart-current-price-tag.price-tag-down { fill: #d95157; }.chart-current-price-text { fill: #fff; font: 9px 'DM Mono', monospace; }.chart-volume-bars { opacity: .62; }.volume-bullish { fill: #23a765; }.volume-bearish { fill: #cf5559; }.candle-wick { stroke-width: 1.2; }.candle-body { stroke-width: .5; }.candle-bullish .candle-wick,.candle-bullish .candle-body { stroke: #218653; }.candle-bullish .candle-body { fill: #35b875; }.candle-bearish .candle-wick,.candle-bearish .candle-body { stroke: #c74343; }.candle-bearish .candle-body { fill: #e35d5d; }.chart-axis { display: flex; justify-content: space-between; gap: 5px; padding: 0 3% 0 5%; color: #92998d; font: 8px 'DM Mono', monospace; }.chart-axis span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.chart-axis span:last-child { text-align: right; }.chart-empty { display: grid; min-height: 145px; place-items: center; color: #8a9186; font-size: 11px; }.chart-source { display: block; margin-top: 10px; color: #92998d; font: 8px 'DM Mono', monospace; }
+.chart-history-note { margin: 9px 0 0; color: #778273; font: 9px 'DM Mono', monospace; line-height: 1.5; }.chart-waiting-label { fill: #a0a7ad; font: 12px 'DM Mono', monospace; text-anchor: middle; }.chart-source { line-height: 1.5; }
 .chart-type-toggle { display: inline-flex; gap: 2px; margin-right: auto; padding: 2px; border: 1px solid #e1e6dc; background: #f1f3ed; }.chart-controls .chart-type-toggle button { min-width: 0; height: 22px; border-color: transparent; background: transparent; color: #77816f; font-size: 7px; }.chart-controls .chart-type-toggle button.active { border-color: #d9e2cf; background: #fff; color: #425735; }.price-line-area { stroke: none; }.price-line-up .price-line-area { fill: rgb(35 154 95 / 14%); }.price-line-down .price-line-area { fill: rgb(199 67 67 / 12%); }.price-line-path { fill: none; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }.price-line-up .price-line-path { stroke: #24985e; }.price-line-down .price-line-path { stroke: #c74343; }
 .listing-panel { min-width: 0; overflow: hidden; border: 1px solid #e2e7dd; background: #fafbf8; }.listing-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 13px; border-bottom: 1px solid #e2e7dd; }.listing-panel-header > div > span { color: #8a9382; font: 7px 'DM Mono', monospace; letter-spacing: .7px; }.listing-panel-header h3 { margin-top: 4px; color: #283025; font: 700 14px Manrope, sans-serif; }.listing-count { color: #75816e; font: 7px 'DM Mono', monospace; }.venue-list { display: grid; }.venue-item { display: grid; grid-template-columns: 31px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 67px; padding: 9px 11px; border-bottom: 1px solid #e8ebe5; }.venue-item:last-child { border-bottom: 0; }.venue-logo { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgb(0 0 0 / 6%); border-radius: 9px; font: 800 9px Manrope, sans-serif; letter-spacing: -.3px; }.venue-logo-theme-0 { background: #e9e3ff; color: #6847ac; }.venue-logo-theme-1 { background: #dff2ea; color: #287353; }.venue-logo-theme-2 { background: #e3efff; color: #3768ad; }.venue-logo-theme-3 { background: #fff0d8; color: #94671f; }.venue-logo-theme-4 { background: #fde3e1; color: #a6463c; }.venue-logo-theme-5 { background: #e0f3f7; color: #327587; }.venue-details { display: grid; min-width: 0; gap: 3px; }.venue-details strong { overflow: hidden; color: #354030; font: 700 10px Manrope, sans-serif; text-overflow: ellipsis; white-space: nowrap; }.venue-details > span { color: #899283; font: 7px 'DM Mono', monospace; }.venue-details a { width: fit-content; color: #5c7543; font: 7px 'DM Mono', monospace; text-decoration: none; }.venue-details a:hover { text-decoration: underline; }.venue-liquidity { color: #354030; font: 600 9px 'DM Mono', monospace; text-align: right; white-space: nowrap; }.venue-liquidity small { display: block; margin-top: 4px; color: #92998f; font-size: 6px; }.listing-empty { padding: 25px 15px; color: #858d80; font-size: 10px; text-align: center; }.listing-source { display: block; padding: 10px 12px; border-top: 1px solid #e2e7dd; color: #92998d; font: 7px 'DM Mono', monospace; line-height: 1.5; }
 .detail-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0; border-top: 1px solid #e8ebe5; border-left: 1px solid #e8ebe5; }.detail-metrics article { display: grid; min-height: 70px; align-content: center; gap: 7px; padding: 11px 13px; border-right: 1px solid #e8ebe5; border-bottom: 1px solid #e8ebe5; }.detail-metrics article > span { color: #879082; font: 8px 'DM Mono', monospace; }.detail-metrics article > strong { overflow: hidden; color: #293126; font: 600 15px Manrope, sans-serif; text-overflow: ellipsis; white-space: nowrap; }.detail-metrics article > small { color: #879082; font: 7px 'DM Mono', monospace; }

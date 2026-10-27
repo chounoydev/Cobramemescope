@@ -47,6 +47,12 @@ const authLimiter = rateLimit({
     response.status(429).json({ error: 'Too many sign-in attempts. Please wait 15 minutes and try again.' })
   },
 })
+const usernameAvailabilityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+})
 let profileTableSetup
 
 async function ensureProfileTable() {
@@ -84,6 +90,24 @@ async function ensureProfileTable() {
 function createInviteCode() {
   return randomBytes(12).toString('hex')
 }
+
+router.get('/username-availability', usernameAvailabilityLimiter, async (request, response, next) => {
+  const username = String(request.query.username || '').trim()
+  if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) {
+    return response.status(400).json({ error: 'Username must be 3–24 characters using letters, numbers, and underscores.' })
+  }
+  try {
+    await ensureProfileTable()
+    const result = await query(
+      'SELECT EXISTS (SELECT 1 FROM user_profiles WHERE LOWER(username) = LOWER($1)) AS taken',
+      [username],
+    )
+    response.set('Cache-Control', 'private, no-store')
+    response.json({ available: !result.rows[0].taken })
+  } catch (error) {
+    next(error)
+  }
+})
 
 async function findInviterIdentity(inviteCode) {
   if (!inviteCode) return null
