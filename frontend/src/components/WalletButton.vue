@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Settings2 } from '@lucide/vue'
 import { App } from '@capacitor/app'
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
@@ -151,6 +151,28 @@ const recentWalletKeys = ref<string[]>([])
 const providerRefreshVersion = ref(0)
 const pendingSession = ref<PendingSession | null>(null)
 let usernameAvailabilityRequest = 0
+let previousBodyOverflow: string | null = null
+let previousDocumentOverflow: string | null = null
+
+function handleWalletDialogKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') dialogOpen.value = false
+}
+
+watch(dialogOpen, (isOpen) => {
+  if (isOpen) {
+    previousBodyOverflow = document.body.style.overflow
+    previousDocumentOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    window.addEventListener('keydown', handleWalletDialogKeydown)
+    return
+  }
+  window.removeEventListener('keydown', handleWalletDialogKeydown)
+  if (previousBodyOverflow !== null) document.body.style.overflow = previousBodyOverflow
+  if (previousDocumentOverflow !== null) document.documentElement.style.overflow = previousDocumentOverflow
+  previousBodyOverflow = null
+  previousDocumentOverflow = null
+})
 
 const walletSessionTokenKey = 'memescope-wallet-token'
 const walletSessionAddressKey = 'memescope-wallet-address'
@@ -1205,6 +1227,9 @@ onMounted(() => {
   })()
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleWalletDialogKeydown)
+  if (previousBodyOverflow !== null) document.body.style.overflow = previousBodyOverflow
+  if (previousDocumentOverflow !== null) document.documentElement.style.overflow = previousDocumentOverflow
   window.removeEventListener(openLoginEventName, handleOpenLoginRequest)
   window.removeEventListener('eip6963:announceProvider', handleAnnouncedEvmWallet)
   window.removeEventListener('ethereum#initialized', requestInjectedWallets)
@@ -1222,7 +1247,8 @@ onBeforeUnmount(() => {
     </button>
   </div>
 
-  <div v-if="dialogOpen" class="wallet-backdrop" @click.self="dialogOpen = false" @keydown.esc="dialogOpen = false">
+  <Teleport to="body">
+  <div v-if="dialogOpen" class="wallet-backdrop" @click.self="dialogOpen = false">
     <section class="wallet-dialog" role="dialog" aria-modal="true" aria-labelledby="wallet-dialog-title">
       <header class="dialog-header">
         <div><span class="dialog-eyebrow">{{ settingsMode ? 'ACCOUNT PREFERENCES' : profileSetup ? 'YOUR PROFILE' : 'COBRA MEMESCOPE ACCOUNT' }}</span><h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : emailMode === 'signup' ? 'Create your account' : 'Welcome back' }}</h2></div>
@@ -1402,6 +1428,7 @@ onBeforeUnmount(() => {
       <p v-if="errorMessage" class="wallet-error" role="alert">{{ errorMessage }}</p>
     </section>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1410,15 +1437,16 @@ onBeforeUnmount(() => {
 .wallet-button img { width: 27px; height: 27px; border: 1px solid #8ca14d; border-radius: 50%; background: #171d18; object-fit: cover; }
 .account-settings-button { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line, #333); border-radius: 50%; background: var(--surface, #151515); color: var(--text, #f3f3f3); cursor: pointer; }
 .account-settings-button:hover,.account-settings-button:focus-visible { border-color: #a8cc58; color: #c7eb6c; }
-.wallet-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 68%); backdrop-filter: blur(7px); }
-.wallet-dialog { width: min(100%, 440px); max-height: min(90dvh, 820px); overflow-y: auto; padding: 26px; border: 1px solid var(--line, #303030); border-radius: 20px; background: var(--surface, #111); color: var(--text, #f5f5f5); box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
-.dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.wallet-backdrop { position: fixed; z-index: 10000; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 68%); backdrop-filter: blur(7px); overscroll-behavior: contain; }
+.wallet-dialog { width: min(100%, 440px); max-height: min(90dvh, 820px); overflow-y: auto; overscroll-behavior: contain; padding: 26px; border: 1px solid var(--line, #303030); border-radius: 20px; background: var(--surface, #111); color: var(--text, #f5f5f5); box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
+.dialog-header { position: sticky; top: -26px; z-index: 3; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: -26px -26px 0; padding: 26px 26px 14px; border-bottom: 1px solid #303830; background: var(--surface, #111); }
 .dialog-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .settings-back-button { min-height: 34px; padding: 0 10px; border: 1px solid #383838; border-radius: 999px; background: #191919; color: #d5e9a5; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
 .dialog-eyebrow { color: #a3c94d; font-size: 10px; font-weight: 800; letter-spacing: .14em; }
 .dialog-header h2 { margin: 5px 0 0; font-size: clamp(17px, 5vw, 27px); letter-spacing: -.04em; }
 .dialog-header h2.connected-title { font-size: clamp(18px, 4vw, 22px); line-height: 1.2; letter-spacing: -.03em; }
-.dialog-close { width: 34px; height: 34px; border: 1px solid var(--line, #333); border-radius: 50%; background: transparent; color: inherit; font-size: 23px; cursor: pointer; }
+.dialog-close { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border: 1px solid var(--line, #333); border-radius: 50%; background: #202820; color: inherit; font-size: 25px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+.dialog-close:hover { border-color: #a8cc58; background: #293425; color: #c7eb6c; }
 .settings-description { margin: 14px 0; color: #a5a5a5; font-size: 13px; line-height: 1.55; }
 .settings-profile { display: flex; align-items: center; gap: 11px; padding: 13px 0 17px; border-bottom: 1px solid #303030; }
 .settings-profile .connected-details { min-width: 0; }
@@ -1555,8 +1583,9 @@ onBeforeUnmount(() => {
 .wallet-error { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #633b36; border-radius: 9px; background: #281c1a; color: #ffb6a9; font-size: 12px; line-height: 1.5; }
 .wallet-dialog button:focus-visible,.wallet-dialog input:focus-visible,.wallet-dialog select:focus-visible { outline: 2px solid #a8cb5c; outline-offset: 2px; }
 @media (max-width: 480px) {
-  .wallet-backdrop { align-items: end; padding: 0; }
-  .wallet-dialog { width: 100%; max-height: 92dvh; padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
+  .wallet-backdrop { align-items: end; padding: env(safe-area-inset-top) 0 0; }
+  .wallet-dialog { width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
+  .dialog-header { top: -22px; margin: -22px -18px 0; padding: calc(14px + env(safe-area-inset-top)) 18px 12px; }
   .dialog-header h2 { font-size: 24px; }
   .invite-preference { padding: 12px; }
   .invite-link-row { align-items: stretch; }
