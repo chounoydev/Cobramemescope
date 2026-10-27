@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Bell, House, Moon, Sun } from '@lucide/vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { Bell, House } from '@lucide/vue'
 import AdsBanner from './components/AdsBanner.vue'
 import AdminContentDashboard from './components/AdminContentDashboard.vue'
 import AssistantChat from './components/AssistantChat.vue'
@@ -85,7 +85,6 @@ const landingSlides = ref<LandingEvent[]>([
 ])
 
 const ownerWalletAddress = 'J4SBuzguguPJh6uU6SiVPX4qfsUDoDbRcEPXa6R8Jbob'
-const darkModeStorageKey = 'memescope-dark-mode'
 const seasonalThemeStorageKey = 'memescope-site-seasonal-theme'
 
 function readCachedSiteTheme(): SeasonalTheme {
@@ -144,16 +143,6 @@ const halloweenBats = [
 const halloweenMessageVisible = ref(false)
 let halloweenMessageTimer: number | undefined
 let siteThemeLoadErrorLogged = false
-function readDarkModePreference() {
-  try {
-    return localStorage.getItem(darkModeStorageKey) !== 'false'
-  } catch (error) {
-    console.warn('Could not read the color mode preference:', error)
-    return true
-  }
-}
-
-const isDarkMode = ref(readDarkModePreference())
 const trendingWatchlistStorageKey = 'memescope-trending-watchlist'
 const explicitTrendingWatchlistMigrationKey = 'memescope-explicit-trending-watchlist-v1'
 const watchlistAlertsStorageKey = 'memescope-watchlist-alerts'
@@ -167,20 +156,6 @@ if (localStorage.getItem(explicitTrendingWatchlistMigrationKey) !== 'done') {
 }
 
 document.documentElement.dataset.seasonalTheme = seasonalTheme.value
-
-watch(isDarkMode, (darkMode) => {
-  document.documentElement.classList.toggle('dark-mode', darkMode)
-  document.documentElement.style.colorScheme = darkMode ? 'dark' : 'light'
-  try {
-    localStorage.setItem(darkModeStorageKey, String(darkMode))
-  } catch (error) {
-    console.warn('Could not save the color mode preference:', error)
-  }
-}, { immediate: true })
-
-function toggleColorMode() {
-  isDarkMode.value = !isDarkMode.value
-}
 
 function applySiteTheme(theme: SeasonalTheme) {
   seasonalTheme.value = theme
@@ -963,10 +938,6 @@ onUnmounted(() => {
       <button type="button" class="admin-portal-brand" @click="navigateToPublicSite"><img class="scanner-brand-mark" src="/mascot-profile.png" alt="" /><span>COBRA <span>MEMESCOPE</span></span></button>
       <div class="admin-portal-label"><span></span> PRIVATE ADMIN PORTAL <b>/</b> {{ adminRole ? adminRole.toUpperCase() : 'WALLET ACCESS REQUIRED' }}</div>
       <div class="admin-portal-actions">
-        <button type="button" class="theme-toggle" :aria-label="`Switch to ${isDarkMode ? 'light' : 'dark'} mode`" @click="toggleColorMode">
-          <Sun v-if="isDarkMode" :size="15" aria-hidden="true" /><Moon v-else :size="15" aria-hidden="true" />
-          <span>{{ isDarkMode ? 'Light' : 'Dark' }}</span>
-        </button>
         <WalletButton @wallet-session="handleWalletSession" @wallet-signed-out="handleWalletSignedOut" />
       </div>
     </header>
@@ -1075,10 +1046,6 @@ onUnmounted(() => {
             <span :class="trendingCoins.length > 0 ? 'feed-live' : 'feed-sample'"></span>
             {{ trendingCoins.length > 0 ? 'FRESH FEED LIVE' : trendingLoading ? 'FINDING LAUNCHES' : 'FRESH FEED OFFLINE' }}
           </div>
-          <button class="theme-toggle" type="button" :aria-label="`Switch to ${isDarkMode ? 'light' : 'dark'} mode`" @click="toggleColorMode">
-            <Sun v-if="isDarkMode" :size="15" aria-hidden="true" /><Moon v-else :size="15" aria-hidden="true" />
-            <span>{{ isDarkMode ? 'Light' : 'Dark' }}</span>
-          </button>
           <div class="watchlist-notifications">
             <button class="notification-trigger" type="button" :aria-expanded="notificationsOpen" aria-label="Notifications" @click="primeNotificationAudio(); notificationsOpen = !notificationsOpen"><Bell :size="17" :stroke-width="1.8" /><i v-if="unreadNotificationCount">{{ unreadNotificationCount }}</i></button>
             <section v-if="notificationsOpen" class="notification-popover" aria-label="Notifications">
