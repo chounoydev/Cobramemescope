@@ -153,21 +153,33 @@ const pendingSession = ref<PendingSession | null>(null)
 let usernameAvailabilityRequest = 0
 let previousBodyOverflow: string | null = null
 let previousDocumentOverflow: string | null = null
+let androidBackButtonListener: PluginListenerHandle | null = null
 
 function handleWalletDialogKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') dialogOpen.value = false
 }
 
-watch(dialogOpen, (isOpen) => {
+watch(dialogOpen, async (isOpen) => {
   if (isOpen) {
     previousBodyOverflow = document.body.style.overflow
     previousDocumentOverflow = document.documentElement.style.overflow
     document.body.style.overflow = 'hidden'
     document.documentElement.style.overflow = 'hidden'
     window.addEventListener('keydown', handleWalletDialogKeydown)
+    if (Capacitor.isNativePlatform()) {
+      androidBackButtonListener = await App.addListener('backButton', () => {
+        dialogOpen.value = false
+      })
+      if (!dialogOpen.value) {
+        await androidBackButtonListener.remove()
+        androidBackButtonListener = null
+      }
+    }
     return
   }
   window.removeEventListener('keydown', handleWalletDialogKeydown)
+  await androidBackButtonListener?.remove()
+  androidBackButtonListener = null
   if (previousBodyOverflow !== null) document.body.style.overflow = previousBodyOverflow
   if (previousDocumentOverflow !== null) document.documentElement.style.overflow = previousDocumentOverflow
   previousBodyOverflow = null
@@ -1228,6 +1240,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleWalletDialogKeydown)
+  void androidBackButtonListener?.remove()
+  androidBackButtonListener = null
   if (previousBodyOverflow !== null) document.body.style.overflow = previousBodyOverflow
   if (previousDocumentOverflow !== null) document.documentElement.style.overflow = previousDocumentOverflow
   window.removeEventListener(openLoginEventName, handleOpenLoginRequest)
@@ -1437,7 +1451,7 @@ onBeforeUnmount(() => {
 .wallet-button img { width: 27px; height: 27px; border: 1px solid #8ca14d; border-radius: 50%; background: #171d18; object-fit: cover; }
 .account-settings-button { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line, #333); border-radius: 50%; background: var(--surface, #151515); color: var(--text, #f3f3f3); cursor: pointer; }
 .account-settings-button:hover,.account-settings-button:focus-visible { border-color: #a8cc58; color: #c7eb6c; }
-.wallet-backdrop { position: fixed; z-index: 10000; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 68%); backdrop-filter: blur(7px); overscroll-behavior: contain; }
+.wallet-backdrop { position: fixed; z-index: 2147483647; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 68%); backdrop-filter: blur(7px); overscroll-behavior: contain; }
 .wallet-dialog { width: min(100%, 440px); max-height: min(90dvh, 820px); overflow-y: auto; overscroll-behavior: contain; padding: 26px; border: 1px solid var(--line, #303030); border-radius: 20px; background: var(--surface, #111); color: var(--text, #f5f5f5); box-shadow: 0 24px 80px rgb(0 0 0 / 45%); }
 .dialog-header { position: sticky; top: -26px; z-index: 3; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: -26px -26px 0; padding: 26px 26px 14px; border-bottom: 1px solid #303830; background: var(--surface, #111); }
 .dialog-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
@@ -1583,9 +1597,10 @@ onBeforeUnmount(() => {
 .wallet-error { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #633b36; border-radius: 9px; background: #281c1a; color: #ffb6a9; font-size: 12px; line-height: 1.5; }
 .wallet-dialog button:focus-visible,.wallet-dialog input:focus-visible,.wallet-dialog select:focus-visible { outline: 2px solid #a8cb5c; outline-offset: 2px; }
 @media (max-width: 480px) {
-  .wallet-backdrop { align-items: end; padding: env(safe-area-inset-top) 0 0; }
+  .wallet-backdrop { align-items: end; padding: max(0px, env(safe-area-inset-top)) 0 0; }
   .wallet-dialog { width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
-  .dialog-header { top: -22px; margin: -22px -18px 0; padding: calc(14px + env(safe-area-inset-top)) 18px 12px; }
+  .dialog-header { top: 0; margin: -22px -18px 0; padding: max(14px, env(safe-area-inset-top)) 18px 12px; }
+  .dialog-close { width: 48px; height: 48px; flex-basis: 48px; border-color: #66784c; background: #273322; color: #d7edaa; font-size: 30px; box-shadow: 0 3px 12px rgb(0 0 0 / 25%); }
   .dialog-header h2 { font-size: 24px; }
   .invite-preference { padding: 12px; }
   .invite-link-row { align-items: stretch; }

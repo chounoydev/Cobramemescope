@@ -73,7 +73,7 @@ function formatAge(hours: number) {
 
 <template>
   <div class="trending-table-wrap" role="region" aria-label="Market listings; swipe horizontally to view all metrics" tabindex="0">
-    <div class="table-swipe-hint" aria-hidden="true"><span>←</span> SWIPE TO VIEW ALL MARKET METRICS <span>→</span></div>
+    <div class="table-swipe-hint" aria-hidden="true"><span>←</span> SWIPE FOR LIQUIDITY, VOLUME &amp; RISK <span>→</span></div>
     <table class="trending-table">
       <thead>
         <tr><th>#</th><th>Token</th><th>Chain</th><th>Market cap</th><th>Pool age</th><th>24h move</th><th>Liquidity</th><th>24h volume</th><th>Buys / sells</th><th>Risk review</th><th></th></tr>
@@ -126,29 +126,24 @@ function formatAge(hours: number) {
   .trending-table-wrap .table-swipe-hint { display: flex; }
 }
 @media (max-width: 700px) {
-  .trending-table { width: 1605px; min-width: 1605px; table-layout: fixed; }
-  .trending-table th:nth-child(1) { width: 48px; }
-  .trending-table th:nth-child(2) { width: 240px; }
-  .trending-table th:nth-child(3) { width: 115px; }
-  .trending-table th:nth-child(4) { width: 135px; }
-  .trending-table th:nth-child(5) { width: 95px; }
-  .trending-table th:nth-child(6) { width: 145px; }
-  .trending-table th:nth-child(7) { width: 170px; }
-  .trending-table th:nth-child(8) { width: 145px; }
-  .trending-table th:nth-child(9) { width: 120px; }
-  .trending-table th:nth-child(10) { width: 220px; }
-  .trending-table th:nth-child(11) { width: 170px; }
+  .trending-table { width: 1468px; min-width: 1468px; table-layout: fixed; }
+  .trending-table th:nth-child(1) { width: 44px; }
+  .trending-table th:nth-child(2) { width: 190px; }
+  .trending-table th:nth-child(3) { width: 100px; }
+  .trending-table th:nth-child(4) { width: 130px; }
+  .trending-table th:nth-child(5) { width: 84px; }
+  .trending-table th:nth-child(6) { width: 140px; }
+  .trending-table th:nth-child(7) { width: 155px; }
+  .trending-table th:nth-child(8) { width: 130px; }
+  .trending-table th:nth-child(9) { width: 105px; }
+  .trending-table th:nth-child(10) { width: 200px; }
+  .trending-table th:nth-child(11) { width: 190px; }
   .trending-table th { height: 42px; padding: 0 10px; font-size: 8px; }
   .trending-table td { height: 72px; padding: 0 10px; font-size: 11px; }
-  .trending-table th:nth-child(2),.trending-table td:nth-child(2) { position: sticky; left: 48px; z-index: 2; background: #fff; box-shadow: 5px 0 10px rgb(25 34 24 / 8%); }
-  .trending-table thead th:nth-child(2) { z-index: 4; background: #f8f9f5; }
-  .trending-table th:nth-child(1),.trending-table td:nth-child(1) { position: sticky; left: 0; z-index: 3; background: #fff; }
-  .trending-table thead th:nth-child(1) { z-index: 5; background: #f8f9f5; }
-  .trending-table tbody tr:hover td:nth-child(1),.trending-table tbody tr:hover td:nth-child(2) { background: #fbfcf8; }
   .token-cell { gap: 8px; }
   .token-cell img,.token-fallback { width: 30px; height: 30px; }
-  .token-cell strong,.token-detail-trigger { max-width: 175px; font-size: 11px; }
-  .token-cell div > span:not(.boost-tag) { max-width: 195px; font-size: 8px; }
+  .token-cell strong,.token-detail-trigger { max-width: 130px; font-size: 11px; }
+  .token-cell div > span:not(.boost-tag) { max-width: 140px; font-size: 8px; }
   .chain-tag { font-size: 10px; }
   .numeric-cell,.activity-cell,.move-cell { font-size: 10px !important; }
   .move-cell small,.liquidity-cell small,.risk-cell small { display: block; font-size: 8px; }
@@ -157,9 +152,10 @@ function formatAge(hours: number) {
   .risk-cell strong { font-size: 8px; }
   .risk-cell small { max-width: 175px; line-height: 1.4; }
   .row-actions { gap: 6px; }
+  .row-actions button { flex: 0 0 auto; }
   .row-actions button { min-height: 36px; padding: 7px 9px; font-size: 8px; }
   .row-actions .watchlist-toggle { width: 36px; }
-  .trending-table-wrap .table-swipe-hint { position: sticky; left: 0; width: 100%; }
+  .trending-table-wrap { touch-action: pan-x pan-y; }
 }
 .table-swipe-hint { display: none; min-height: 34px; align-items: center; justify-content: center; gap: 9px; border-bottom: 1px solid #e5e8e1; background: #f8f9f5; color: #65744c; font: 800 8px 'DM Mono', monospace; letter-spacing: .06em; }
 .trending-table-wrap:focus-visible { outline: 2px solid #8da64e; outline-offset: 2px; }
@@ -167,7 +163,5 @@ function formatAge(hours: number) {
 .trending-table-wrap::-webkit-scrollbar { height: 7px; }
 .trending-table-wrap::-webkit-scrollbar-thumb { border-radius: 999px; background: #9eac86; }
 .trending-table-wrap::-webkit-scrollbar-track { background: #eff1eb; }
-.trending-table tbody tr.boosted-row td:nth-child(1),.trending-table tbody tr.boosted-row td:nth-child(2) { background: #fffdf5; }
-.trending-table tbody tr.boosted-row:hover td:nth-child(1),.trending-table tbody tr.boosted-row:hover td:nth-child(2) { background: #fbfcf8; }
 .table-empty { text-align: center; }
 </style>
