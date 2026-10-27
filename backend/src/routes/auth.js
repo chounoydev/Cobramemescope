@@ -9,6 +9,15 @@ import { requireAuth, requireAuthAllowPendingDeletion, requireEmailAuth } from '
 
 const router = Router()
 
+function requireJwtSecret(_request, response, next) {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+    return response.status(503).json({
+      error: 'Sign-in is unavailable because JWT_SECRET is not configured as a random string of at least 32 characters.',
+    })
+  }
+  next()
+}
+
 async function recordLoginEvent({ userId = null, walletAddress = null, authType }) {
   try {
     await query(`
@@ -108,7 +117,7 @@ function createToken(user) {
   return jwt.sign({ email: user.email }, process.env.JWT_SECRET, { subject: String(user.id), expiresIn: '7d' })
 }
 
-router.post('/register', authLimiter, async (request, response, next) => {
+router.post('/register', requireJwtSecret, authLimiter, async (request, response, next) => {
   const email = String(request.body?.email || '').trim().toLowerCase()
   const password = String(request.body?.password || '')
   const username = String(request.body?.username || '').trim()
@@ -148,7 +157,7 @@ router.post('/register', authLimiter, async (request, response, next) => {
   }
 })
 
-router.post('/login', authLimiter, async (request, response, next) => {
+router.post('/login', requireJwtSecret, authLimiter, async (request, response, next) => {
   const email = String(request.body?.email || '').trim().toLowerCase()
   const password = String(request.body?.password || '')
 
@@ -177,7 +186,7 @@ router.post('/wallet/challenge', authLimiter, (request, response) => {
   }
 })
 
-router.post('/wallet/verify', authLimiter, async (request, response, next) => {
+router.post('/wallet/verify', requireJwtSecret, authLimiter, async (request, response, next) => {
   const address = String(request.body?.address || '')
   const nonce = String(request.body?.nonce || '')
   const signature = request.body?.signature
@@ -208,7 +217,7 @@ router.post('/wallet/evm-challenge', authLimiter, (request, response) => {
   }
 })
 
-router.post('/wallet/evm-verify', authLimiter, async (request, response, next) => {
+router.post('/wallet/evm-verify', requireJwtSecret, authLimiter, async (request, response, next) => {
   const address = String(request.body?.address || '')
   const nonce = String(request.body?.nonce || '')
   const signature = request.body?.signature

@@ -19,10 +19,6 @@ import { isAllowedFrontendOrigin } from './utils/frontendOrigins.js'
 import { fileURLToPath } from 'node:url'
 import { processScheduledAccountDeletions } from './services/accountDeletion.js'
 
-if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-  throw new Error('JWT_SECRET must be set to a random string of at least 32 characters.')
-}
-
 const app = express()
 app.disable('x-powered-by')
 app.use(helmet())
@@ -34,20 +30,52 @@ app.use(cors({
 app.use(express.json({ limit: '16kb' }))
 
 app.get('/api/health', async (_request, response) => {
+  const authentication = process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32
+    ? 'ready'
+    : 'unavailable'
   if (!process.env.DATABASE_URL) {
     return response.status(503).json({
       status: 'error',
       database: 'unavailable',
+      schema: 'unavailable',
+      authentication,
       error: 'DATABASE_URL is not configured in the backend environment.',
     })
   }
 
   try {
-    await pool.query('SELECT 1')
-    response.json({ status: 'ok', database: 'connected' })
+    const result = await pool.query(`
+      SELECT to_regclass('public.users') AS users_table,
+             to_regclass('public.user_profiles') AS profiles_table
+    `)
+    if (!result.rows[0]?.users_table || !result.rows[0]?.profiles_table) {
+      return response.status(503).json({
+        status: 'error',
+        database: 'connected',
+        schema: 'missing',
+        authentication,
+        error: 'The database is reachable, but the application schema is not installed. Apply backend/schema.sql.',
+      })
+    }
+    if (authentication !== 'ready') {
+      return response.status(503).json({
+        status: 'error',
+        database: 'connected',
+        schema: 'ready',
+        authentication,
+        error: 'JWT_SECRET must be set to a random string of at least 32 characters.',
+      })
+    }
+    response.json({ status: 'ok', database: 'connected', schema: 'ready', authentication })
   } catch (error) {
     console.error('Database health check failed:', error.message)
-    response.status(503).json({ status: 'error', database: 'unavailable' })
+    response.status(503).json({
+      status: 'error',
+      database: 'unavailable',
+      schema: 'unknown',
+      authentication,
+      error: 'The database connection failed. Check DATABASE_URL and database network settings.',
+    })
   }
 })
 app.get('/api/cron/account-deletions', async (request, response, next) => {
@@ -114,6 +142,9 @@ app.use((error, _request, response, _next) => {
   }
   if (error.code === 'ECONNREFUSED') {
     return response.status(503).json({ error: 'The database is not accepting connections. Check DATABASE_URL and the database network settings.' })
+  }
+  if (error.code === '42P01' || error.code === '42703') {
+    return response.status(503).json({ error: 'The application database schema is missing or outdated. Apply backend/schema.sql.' })
   }
   response.status(500).json({ error: 'The request could not be completed.' })
 })

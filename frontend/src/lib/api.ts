@@ -262,7 +262,7 @@ export async function fetchTrendingMemecoins(): Promise<{ coins: TrendingMemecoi
 export async function fetchTrendingMemecoinDetails(chainId: string, address: string, interval: MarketChartInterval = '1h', signal?: AbortSignal): Promise<TrendingMemecoinDetails> {
   const query = new URLSearchParams({ interval })
   const response = await fetch(`${apiBaseUrl}/api/market/trending/${encodeURIComponent(chainId)}/${encodeURIComponent(address)}?${query}`, { signal })
-  const payload = await response.json() as TrendingMemecoinDetails & { error?: string }
+  const payload = await readApiResponse<TrendingMemecoinDetails & { error?: string }>(response, 'Could not load token market details. The API may be unavailable or timed out.')
   if (!response.ok || !payload.market || !Array.isArray(payload.chart?.points)) throw new Error(payload.error || 'Could not load token market details.')
   return payload
 }
