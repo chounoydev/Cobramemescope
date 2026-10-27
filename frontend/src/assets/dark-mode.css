@@ -119,6 +119,53 @@
   --desk-acid: #91f276;
 }
 
+:root.dark-mode .trending-table-wrap .table-swipe-hint {
+  border-color: #1b353e;
+  background: #0c1d23;
+  color: #9cb1b8;
+}
+
+:root.dark-mode .trending-table th:nth-child(1),
+:root.dark-mode .trending-table th:nth-child(2) {
+  border-color: #1b353e;
+  background: #0c1d23;
+  color: #9cb1b8;
+}
+
+:root.dark-mode .trending-table tbody tr:not(.boosted-row) td:nth-child(1),
+:root.dark-mode .trending-table tbody tr:not(.boosted-row) td:nth-child(2) {
+  border-color: #1a333b;
+  background: #09191f;
+}
+
+:root.dark-mode .trending-table tbody tr.boosted-row td:nth-child(1),
+:root.dark-mode .trending-table tbody tr.boosted-row td:nth-child(2) {
+  border-color: #1a333b;
+  background: #122820;
+}
+
+:root.dark-mode .trending-table tbody tr:not(.boosted-row):hover td:nth-child(1),
+:root.dark-mode .trending-table tbody tr:not(.boosted-row):hover td:nth-child(2) {
+  background: #10272b;
+}
+
+:root.dark-mode .trending-table tbody tr.boosted-row:hover td:nth-child(1),
+:root.dark-mode .trending-table tbody tr.boosted-row:hover td:nth-child(2) {
+  background: #183229;
+}
+
+:root.dark-mode .trending-table-wrap {
+  scrollbar-color: #42616a #09191f;
+}
+
+:root.dark-mode .trending-table-wrap::-webkit-scrollbar-track {
+  background: #09191f;
+}
+
+:root.dark-mode .trending-table-wrap::-webkit-scrollbar-thumb {
+  background: #42616a;
+}
+
 :root.dark-mode .trending-table-wrap {
   border-color: #1c3943;
   background: #09191f;
