@@ -1096,10 +1096,10 @@ onUnmounted(() => {
       <div class="scanner-edition">ON-CHAIN RISK DESK <span>V1.0</span></div>
       <div class="scanner-nav-label">WORKSPACE</div>
       <nav class="scanner-nav" aria-label="Main navigation">
-        <button type="button" :class="{ selected: activePage === 'landing' }" :aria-current="activePage === 'landing' ? 'page' : undefined" @click="navigateToLanding">Home<i class="nav-home-icon"><House aria-hidden="true" /></i></button>
-        <button type="button" :class="{ selected: activePage === 'scanner' }" :aria-current="activePage === 'scanner' ? 'page' : undefined" @click="goToScanner">Analyze Token<i>⌕</i></button>
-        <button type="button" :class="{ selected: activePage === 'markets' }" :aria-current="activePage === 'markets' ? 'page' : undefined" @click="activePage = 'markets'">Market tape<i>↗</i></button>
-        <button type="button" :class="{ selected: activePage === 'watchlist' }" :aria-current="activePage === 'watchlist' ? 'page' : undefined" @click="activePage = 'watchlist'">Watchlist<i class="nav-watchlist-icon"><span aria-hidden="true">☆</span><small>{{ (favorites.length + savedTrendingCoins.length).toString().padStart(2, '0') }}</small></i></button>
+        <button type="button" :class="{ selected: activePage === 'landing' }" :aria-current="activePage === 'landing' ? 'page' : undefined" @click="navigateToLanding">home<i class="nav-home-icon"><House aria-hidden="true" /></i></button>
+        <button type="button" :class="{ selected: activePage === 'scanner' }" :aria-current="activePage === 'scanner' ? 'page' : undefined" @click="goToScanner">analyze token<i>⌕</i></button>
+        <button type="button" :class="{ selected: activePage === 'markets' }" :aria-current="activePage === 'markets' ? 'page' : undefined" @click="activePage = 'markets'">market tape<i>↗</i></button>
+        <button type="button" :class="{ selected: activePage === 'watchlist' }" :aria-current="activePage === 'watchlist' ? 'page' : undefined" @click="activePage = 'watchlist'">watchlist<i class="nav-watchlist-icon"><span aria-hidden="true">☆</span><small>{{ (favorites.length + savedTrendingCoins.length).toString().padStart(2, '0') }}</small></i></button>
       </nav>
       <div class="scanner-nav-label chain-label">SUPPORTED CHAINS</div>
       <div class="chain-list">
