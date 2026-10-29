@@ -3120,6 +3120,18 @@
 }
 
 @media (max-width: 760px) {
+  .scanner-shell[data-seasonal-theme="none"] .scanner-nav,
+  .scanner-shell[data-seasonal-theme="christmas"] .scanner-nav,
+  .scanner-shell[data-seasonal-theme="halloween"] .scanner-nav,
+  .scanner-shell[data-seasonal-theme="new-year"] .scanner-nav {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1000;
+  }
+
   .scanner-shell .scanner-nav {
     border-top-color: rgb(145 242 118 / 18%);
     background: rgb(6 18 22 / 97%);
