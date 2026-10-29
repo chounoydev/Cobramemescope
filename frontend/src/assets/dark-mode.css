@@ -2240,6 +2240,7 @@
 }
 
 .scanner-shell[data-seasonal-theme="christmas"]::before {
+  content: '';
   position: fixed;
   inset: 0;
   z-index: 0;
@@ -3177,6 +3178,57 @@
 
   .scanner-shell[data-seasonal-theme="new-year"] .scanner-nav button.selected i {
     color: #ffd36f;
+  }
+
+  .scanner-shell[data-seasonal-theme="christmas"]::before,
+  .scanner-shell[data-seasonal-theme="new-year"]::before,
+  .scanner-shell[data-seasonal-theme="halloween"]::before {
+    background-position: center center;
+    background-size: cover;
+  }
+
+  .scanner-shell[data-seasonal-theme="christmas"] .scanner-sidebar,
+  .scanner-shell[data-seasonal-theme="halloween"] .scanner-sidebar,
+  .scanner-shell[data-seasonal-theme="new-year"] .scanner-sidebar {
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    backdrop-filter: blur(10px);
+  }
+
+  .scanner-shell[data-seasonal-theme="christmas"] .scanner-main,
+  .scanner-shell[data-seasonal-theme="halloween"] .scanner-main,
+  .scanner-shell[data-seasonal-theme="new-year"] .scanner-main {
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-bottom: calc(82px + env(safe-area-inset-bottom));
+  }
+
+  .scanner-shell[data-seasonal-theme="christmas"] .scanner-main .scanner-topbar,
+  .scanner-shell[data-seasonal-theme="halloween"] .scanner-main .scanner-topbar,
+  .scanner-shell[data-seasonal-theme="new-year"] .scanner-main .scanner-topbar {
+    min-height: 64px;
+  }
+
+  .scanner-shell[data-seasonal-theme="christmas"] .market-totals > div,
+  .scanner-shell[data-seasonal-theme="halloween"] .market-totals > div,
+  .scanner-shell[data-seasonal-theme="new-year"] .market-totals > div,
+  .scanner-shell[data-seasonal-theme="christmas"] .discovery-controls,
+  .scanner-shell[data-seasonal-theme="halloween"] .discovery-controls,
+  .scanner-shell[data-seasonal-theme="new-year"] .discovery-controls,
+  .scanner-shell[data-seasonal-theme="christmas"] .chain-filters,
+  .scanner-shell[data-seasonal-theme="halloween"] .chain-filters,
+  .scanner-shell[data-seasonal-theme="new-year"] .chain-filters,
+  .scanner-shell[data-seasonal-theme="christmas"] .trending-table-wrap,
+  .scanner-shell[data-seasonal-theme="halloween"] .trending-table-wrap,
+  .scanner-shell[data-seasonal-theme="new-year"] .trending-table-wrap {
+    border-radius: 8px;
+  }
+
+  .scanner-shell[data-seasonal-theme="christmas"] .scanner-nav,
+  .scanner-shell[data-seasonal-theme="new-year"] .scanner-nav,
+  .scanner-shell[data-seasonal-theme="halloween"] .scanner-nav {
+    z-index: 100;
+    box-sizing: border-box;
   }
 }
 

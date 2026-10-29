@@ -145,6 +145,7 @@ const emailAddress = ref('')
 const emailPassword = ref('')
 const confirmPassword = ref('')
 const emailMode = ref<'signin' | 'signup'>('signup')
+const authView = ref<'signin' | 'signup' | 'wallet'>('signup')
 const usernameAvailability = ref<'idle' | 'checking' | 'available' | 'taken' | 'unavailable'>('idle')
 const emailBusy = ref(false)
 const moreWallets = ref(false)
@@ -991,7 +992,17 @@ async function checkSignupUsername(username = signupUsername.value.trim()): Prom
 
 function toggleEmailMode() {
   emailMode.value = emailMode.value === 'signin' ? 'signup' : 'signin'
+  authView.value = emailMode.value
   resetUsernameAvailability()
+}
+
+function showAuthView(view: 'signin' | 'signup' | 'wallet') {
+  authView.value = view
+  if (view === 'signin' || view === 'signup') {
+    emailMode.value = view
+    resetUsernameAvailability()
+  }
+  errorMessage.value = ''
 }
 
 function openConnectDialog() {
@@ -1304,7 +1315,7 @@ onBeforeUnmount(() => {
 
   <Teleport to="body">
   <div v-if="dialogOpen" class="wallet-backdrop" @click.self="dialogOpen = false">
-    <section class="wallet-dialog" :class="{ 'auth-dialog': !address && !profileSetup && !settingsMode }" role="dialog" aria-modal="true" aria-labelledby="wallet-dialog-title">
+    <section class="wallet-dialog" :class="{ 'auth-dialog': !address && !profileSetup && !settingsMode, 'wallet-auth-dialog': !address && !profileSetup && !settingsMode && authView === 'wallet', 'profile-dialog': profileSetup, 'settings-dialog': settingsMode }" role="dialog" aria-modal="true" aria-labelledby="wallet-dialog-title">
       <header class="dialog-header">
         <div class="dialog-title-block">
           <div class="dialog-brand" v-if="!address && !profileSetup && !settingsMode">
@@ -1312,7 +1323,7 @@ onBeforeUnmount(() => {
             <span><strong>COBRA</strong><small>MEMESCOPE</small></span>
           </div>
           <span class="dialog-eyebrow">{{ settingsMode ? 'ACCOUNT PREFERENCES' : profileSetup ? 'YOUR PROFILE' : 'COBRA MEMESCOPE ACCOUNT' }}</span>
-          <h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : emailMode === 'signup' ? 'Create your account' : 'Welcome back' }}</h2>
+          <h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : authView === 'wallet' ? 'Connect Your Wallet' : authView === 'signup' ? 'Create your account' : 'Welcome back' }}</h2>
         </div>
         <div class="dialog-header-actions">
           <button v-if="settingsMode && !deletionScheduledAt" class="settings-back-button" type="button" @click="settingsMode = false">‹ Profile</button>
@@ -1366,6 +1377,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="profileSetup">
+        <p class="profile-dialog-description">Choose the name and picture people will see across Cobra MemeScope.</p>
         <div class="profile-preview">
           <img :src="avatarDataUrl" alt="Profile picture preview" />
           <span><strong>Your profile picture</strong><small>Keep your generated avatar or upload your own.</small></span>
@@ -1436,13 +1448,52 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else>
-        <p class="dialog-description">{{ emailMode === 'signup' ? 'Create an account to start tracking markets.' : 'Sign in to continue to your account.' }}</p>
+        <template v-if="authView === 'wallet'">
+          <p class="dialog-description">Link your crypto wallet to access all features and manage your account.</p>
+          <div class="auth-form-intro wallet-form-intro">
+            <span class="auth-form-mark wallet-form-mark" aria-hidden="true">✓</span>
+            <div><strong>Your wallet. Your control.</strong><small>We never access your funds. You stay in control.</small></div>
+          </div>
+          <div class="wallet-options wallet-auth-options">
+            <div v-for="wallet in primaryWallets" :key="wallet.key" class="wallet-choice-wrap">
+              <button class="wallet-choice" type="button" :disabled="connecting" @click="connectDetectedWallet(wallet)">
+                <span class="wallet-choice-icon" :class="wallet.walletType === 'solana' ? 'sol-icon' : 'evm-icon'">{{ wallet.name.slice(0, 1) }}</span>
+                <span>{{ connecting ? 'Check your wallet…' : wallet.label }}<small>{{ recentWalletKeys.includes(wallet.key) ? 'Recent wallet' : wallet.network }}</small></span>
+                <span v-if="wallet.key === 'solana:Phantom'" class="wallet-recommended">RECOMMENDED</span>
+                <span class="choice-arrow">›</span>
+              </button>
+              <a v-if="!wallet.provider" class="wallet-install-link" :href="wallet.downloadUrl" target="_blank" rel="noreferrer">Install {{ wallet.name }}</a>
+            </div>
+            <button v-if="additionalWallets.length" class="more-wallets" type="button" @click="moreWallets = !moreWallets">{{ moreWallets ? 'Show fewer wallets' : 'More wallets' }}<span>{{ moreWallets ? '−' : '+' }}</span></button>
+            <template v-if="moreWallets">
+              <div v-for="wallet in additionalWallets" :key="wallet.key" class="wallet-choice-wrap">
+                <button class="wallet-choice" type="button" :disabled="connecting" @click="connectDetectedWallet(wallet)">
+                  <span class="wallet-choice-icon" :class="wallet.walletType === 'evm' ? 'evm-icon' : 'sol-icon'">{{ wallet.name.slice(0, 1) }}</span>
+                  <span>{{ wallet.label }}<small>{{ recentWalletKeys.includes(wallet.key) ? 'Recent wallet' : wallet.network }}</small></span><span class="choice-arrow">›</span>
+                </button>
+                <a v-if="!wallet.provider" class="wallet-install-link" :href="wallet.downloadUrl" target="_blank" rel="noreferrer">Install {{ wallet.name }}</a>
+              </div>
+            </template>
+          </div>
+          <div class="wallet-safety-note">
+            <strong>Important</strong>
+            <ul>
+              <li>Use the correct network for your wallet.</li>
+              <li>Never share your secret recovery phrase.</li>
+              <li>Cobra MemeScope never stores your private keys.</li>
+            </ul>
+          </div>
+          <button class="email-mode wallet-email-back" type="button" @click="showAuthView('signin')">Back to email sign in</button>
+        </template>
+
+        <template v-else>
+        <p class="dialog-description">{{ authView === 'signup' ? 'Join Cobra MemeScope and be part of the fastest growing memecoin community.' : 'Sign in to continue to your account.' }}</p>
         <div class="auth-form-intro">
-          <span class="auth-form-mark" aria-hidden="true">{{ emailMode === 'signup' ? '+' : '✓' }}</span>
-          <div><strong>{{ emailMode === 'signup' ? 'Start with your email' : 'Secure &amp; protected' }}</strong><small>{{ emailMode === 'signup' ? 'Your account keeps your watchlist and profile in sync.' : 'Your account is protected by advanced security measures.' }}</small></div>
+          <span class="auth-form-mark" aria-hidden="true">{{ authView === 'signup' ? '+' : '✓' }}</span>
+          <div><strong>{{ authView === 'signup' ? 'Start with your email' : 'Secure &amp; protected' }}</strong><small>{{ authView === 'signup' ? 'Your account keeps your watchlist and profile in sync.' : 'Your account is protected by advanced security measures.' }}</small></div>
         </div>
         <form class="email-form" @submit.prevent="finishEmailAuth">
-          <template v-if="emailMode === 'signup'">
+          <template v-if="authView === 'signup'">
             <label for="signup-username">USERNAME</label>
             <input id="signup-username" v-model="signupUsername" type="text" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="Choose a username" :aria-invalid="usernameAvailability === 'taken'" :aria-describedby="usernameAvailability === 'idle' ? 'signup-username-help' : 'signup-username-help signup-username-status'" required @input="resetUsernameAvailability" @blur="checkSignupUsername()" />
             <small id="signup-username-help" class="auth-field-help">3–24 letters, numbers, or underscores. Usernames are unique, including capitalization.</small>
@@ -1458,34 +1509,13 @@ onBeforeUnmount(() => {
             <label for="confirm-password">CONFIRM PASSWORD</label>
             <input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Enter your password again" required />
           </template>
-          <button class="email-submit" type="submit" :disabled="emailBusy"><span>{{ emailBusy ? 'Please wait…' : emailMode === 'signup' ? 'Create account' : 'Sign in' }}</span><span aria-hidden="true">{{ emailBusy ? '◌' : '→' }}</span></button>
-          <button class="email-mode" type="button" @click="toggleEmailMode">{{ emailMode === 'signin' ? 'New to Cobra MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
+          <button class="email-submit" type="submit" :disabled="emailBusy"><span>{{ emailBusy ? 'Please wait…' : authView === 'signup' ? 'Create account' : 'Sign in' }}</span><span aria-hidden="true">{{ emailBusy ? '◌' : '→' }}</span></button>
+          <button class="email-mode" type="button" @click="toggleEmailMode">{{ authView === 'signin' ? 'New to Cobra MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
         </form>
 
         <p class="account-note">Your email account and a connected crypto wallet are separate sign-in methods.</p>
-        <div class="wallet-divider"><span>OR CONNECT A WALLET</span></div>
-        <p class="account-note">Choose Phantom, approve the connection, then approve the sign-in message in Phantom. Signing in does not send a transaction.</p>
-        <div class="wallet-options">
-          <div v-for="wallet in primaryWallets" :key="wallet.key" class="wallet-choice-wrap">
-            <button class="wallet-choice" type="button" :disabled="connecting" @click="connectDetectedWallet(wallet)">
-              <span class="wallet-choice-icon" :class="wallet.walletType === 'solana' ? 'sol-icon' : 'evm-icon'">{{ wallet.name.slice(0, 1) }}</span>
-              <span>{{ connecting ? 'Check your wallet…' : wallet.label }}<small>{{ recentWalletKeys.includes(wallet.key) ? 'Recent' : wallet.network }}</small></span>
-              <span v-if="recentWalletKeys.includes(wallet.key)" class="recent-tag">RECENT</span>
-              <span v-else class="choice-arrow">›</span>
-            </button>
-            <a v-if="!wallet.provider" class="wallet-install-link" :href="wallet.downloadUrl" target="_blank" rel="noreferrer">Install {{ wallet.name }}</a>
-          </div>
-          <button v-if="additionalWallets.length" class="more-wallets" type="button" @click="moreWallets = !moreWallets">{{ moreWallets ? 'Show fewer wallets' : 'More wallets' }}<span>{{ moreWallets ? '−' : '+' }}</span></button>
-          <template v-if="moreWallets">
-            <div v-for="wallet in additionalWallets" :key="wallet.key" class="wallet-choice-wrap">
-              <button class="wallet-choice" type="button" :disabled="connecting" @click="connectDetectedWallet(wallet)">
-                <span class="wallet-choice-icon" :class="wallet.walletType === 'evm' ? 'evm-icon' : 'sol-icon'">{{ wallet.name.slice(0, 1) }}</span>
-                <span>{{ wallet.label }}<small>{{ recentWalletKeys.includes(wallet.key) ? 'Recent' : wallet.network }}</small></span><span class="choice-arrow">›</span>
-              </button>
-              <a v-if="!wallet.provider" class="wallet-install-link" :href="wallet.downloadUrl" target="_blank" rel="noreferrer">Install {{ wallet.name }}</a>
-            </div>
-          </template>
-        </div>
+        <button class="wallet-connect-switch" type="button" @click="showAuthView('wallet')"><span aria-hidden="true">◈</span> Connect Wallet <span aria-hidden="true">›</span></button>
+        </template>
       </template>
       <p v-if="errorMessage" class="wallet-error" role="alert">{{ errorMessage }}</p>
     </section>
@@ -1680,6 +1710,108 @@ onBeforeUnmount(() => {
 .auth-dialog .evm-icon { background: #1766b3; color: #fff; }
 .auth-dialog .wallet-choice small { color: #929db0; }
 .auth-dialog .choice-arrow { color: #b7ea4b; }
+.wallet-auth-dialog { width: min(100%, 500px); }
+.wallet-auth-options { margin-top: 14px; }
+.wallet-auth-options .wallet-choice { min-height: 68px; }
+.wallet-recommended { padding: 4px 7px; border-radius: 999px; background: #31432a; color: #b9eb52; font-size: 7px; font-weight: 900; letter-spacing: .08em; }
+.wallet-connect-switch { display: flex; width: 100%; min-height: 54px; align-items: center; justify-content: center; gap: 9px; margin-top: 3px; border: 1px solid #29354a; border-radius: 11px; background: transparent; color: #eef3fb; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+.wallet-connect-switch span:last-child { margin-left: 3px; color: #b7ea4b; font-size: 20px; }
+.wallet-connect-switch:hover { border-color: #8dac40; background: #111927; }
+.wallet-form-intro { margin-top: 4px; }
+.wallet-safety-note { margin-top: 12px; padding: 12px 14px; border: 1px solid #29344a; border-radius: 11px; background: #101827; color: #aab5c7; font-size: 10px; line-height: 1.55; }
+.wallet-safety-note strong { color: #dfe7f5; }
+.wallet-safety-note ul { margin: 5px 0 0; padding-left: 18px; }
+.wallet-email-back { width: 100%; margin-top: 12px; }
+.profile-dialog,
+.settings-dialog {
+  border-color: #273044;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #080f1d, #09101e 72%, #0a1422);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+.profile-dialog .dialog-header,
+.settings-dialog .dialog-header {
+  border-bottom-color: #1d2738;
+  background: #090f1c;
+}
+.profile-dialog .dialog-eyebrow,
+.settings-dialog .dialog-eyebrow {
+  display: block;
+  color: #a9c955;
+}
+.profile-dialog-description,
+.settings-description {
+  color: #aab5c6;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.profile-dialog .profile-preview {
+  margin: 16px 0 14px;
+  padding: 14px;
+  border: 1px solid #344356;
+  border-radius: 12px;
+  background: #101827;
+}
+.profile-dialog .profile-preview img {
+  width: 58px;
+  height: 58px;
+  border: 2px solid #b7df54;
+  box-shadow: 0 0 0 5px rgb(183 223 84 / 7%);
+}
+.profile-dialog .profile-preview strong { color: #edf3fc; }
+.profile-dialog .profile-preview small { color: #98a5b7; }
+.profile-dialog .profile-form label {
+  color: #dfe7f5;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+.profile-dialog .profile-form input {
+  min-height: 52px;
+  border-color: #273044;
+  border-radius: 11px;
+  background: #111827;
+  color: #f7f9fd;
+}
+.profile-dialog .profile-form input:focus {
+  border-color: #a4c948;
+  box-shadow: 0 0 0 3px rgb(164 201 72 / 12%);
+}
+.profile-dialog .profile-submit,
+.settings-dialog .secondary-action {
+  min-height: 52px;
+}
+.settings-dialog .settings-profile,
+.settings-dialog .currency-preference,
+.settings-dialog .delete-account-panel {
+  border-color: #273044;
+  background: #101827;
+}
+.settings-dialog .settings-profile {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 12px;
+}
+.settings-dialog .connected-avatar {
+  border-color: #b7df54;
+}
+.settings-dialog .connected-details strong { color: #edf3fc; }
+.settings-dialog .connected-details span { color: #98a5b7; }
+.settings-dialog .currency-preference { border-radius: 12px; }
+.settings-dialog .currency-preference > div:first-child strong,
+.settings-dialog .delete-account-panel > strong { color: #edf3fc; }
+.settings-dialog .currency-preference > div:first-child small,
+.settings-dialog .currency-rate-footer small,
+.settings-dialog .delete-account-panel p { color: #98a5b7; }
+.settings-dialog .country-select select,
+.settings-dialog .secondary-action {
+  border-color: #273044;
+  background: #111827;
+  color: #edf3fc;
+}
+.settings-dialog .delete-account-panel {
+  border-radius: 12px;
+}
+.settings-dialog .delete-account-eyebrow { color: #ff9d93; }
 @media (max-width: 480px) {
   .wallet-backdrop { align-items: end; padding: max(0px, env(safe-area-inset-top)) 0 0; }
   .wallet-dialog { width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
