@@ -492,9 +492,18 @@ function readableError(error: unknown) {
 function handleBannedAccount(error: unknown) {
   const message = readableError(error)
   if (!/banned/i.test(message)) return false
-  emit('wallet-banned', message)
+  const reason = message
+    .replace(/^This (?:account|wallet) is banned\.\s*/i, '')
+    .replace(/^Reason:\s*/i, '')
+    .trim()
+  dialogOpen.value = false
   clearConnection()
-  emit('wallet-signed-out')
+  emit(
+    'wallet-banned',
+    !reason || /^No reason provided\.?$/i.test(reason)
+      ? 'You have been banned due to a violation of our community rules and terms of service.'
+      : reason,
+  )
   return true
 }
 
@@ -589,6 +598,19 @@ async function restoreWalletSession() {
   } catch (error) {
     if (handleBannedAccount(error)) return
     errorMessage.value = readableError(error)
+  }
+}
+
+async function checkAccountBanStatus() {
+  const token = sessionToken.value
+  if (!token) return
+
+  try {
+    await fetchAuthProfile(token)
+  } catch (error) {
+    if (sessionToken.value !== token) return
+    if (handleBannedAccount(error)) return
+    console.warn('Account status check failed:', readableError(error))
   }
 }
 
@@ -1229,6 +1251,8 @@ function handleCountryChange(event: Event) {
   setSelectedCountry((event.target as HTMLSelectElement).value)
 }
 
+let accountStatusTimer: number | undefined
+
 onMounted(() => {
   readReferralCode()
   window.addEventListener(openLoginEventName, handleOpenLoginRequest)
@@ -1252,8 +1276,10 @@ onMounted(() => {
     }
     if (!(await resumePhantomDeepLink())) await restoreWalletSession()
   })()
+  accountStatusTimer = window.setInterval(() => { void checkAccountBanStatus() }, 60_000)
 })
 onBeforeUnmount(() => {
+  window.clearInterval(accountStatusTimer)
   window.removeEventListener('keydown', handleWalletDialogKeydown)
   void androidBackButtonListener?.remove()
   androidBackButtonListener = null

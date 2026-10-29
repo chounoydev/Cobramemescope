@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Bell, House } from '@lucide/vue'
 import AdsBanner from './components/AdsBanner.vue'
+import AdminChatDashboard from './components/AdminChatDashboard.vue'
 import AdminContentDashboard from './components/AdminContentDashboard.vue'
 import AssistantChat from './components/AssistantChat.vue'
 import CoinTable from './components/CoinTable.vue'
@@ -17,7 +18,7 @@ import { fetchAdminAccess, fetchContractScan, fetchDonorDashboard, fetchLandingE
 import { formatCurrency } from './lib/currency'
 
 type AppPage = 'landing' | 'scanner' | 'markets' | 'watchlist'
-type AdminSection = 'content' | 'donors'
+type AdminSection = 'content' | 'donors' | 'chat'
 type WalletSession = { address: string; token: string } | null
 type WatchlistPriceAlert = {
   id: string
@@ -1004,29 +1005,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="bannedUser" class="banned-access-shell">
-    <div class="banned-access-backdrop">
-      <div class="banned-access-card" role="alertdialog" aria-modal="true" aria-labelledby="banned-user-title">
-        <div class="banned-access-crown" aria-hidden="true">✦</div>
-        <div class="banned-access-crest" aria-hidden="true">
-          <span class="banned-access-circle">⛔</span>
-        </div>
-        <h1 id="banned-user-title">You're Banned</h1>
-        <p class="banned-access-subline">of Cobra Memescope</p>
-        <div class="banned-access-panel">
-          <div class="banned-access-panel-header">
-            <span class="banned-access-warning">⚠</span>
-            <strong>Violation</strong>
-          </div>
-          <p>{{ bannedUser.reason || 'You have been banned due to a violation of our community rules and terms of service.' }}</p>
-          <small>The violation is not closed. You can only sign out for now.</small>
-        </div>
-        <button type="button" class="banned-signout-button" @click="handleBannedSignOut">Sign Out</button>
-      </div>
-    </div>
-  </div>
-
-  <div v-else-if="isAdminPortal" class="admin-portal-shell">
+  <div v-if="isAdminPortal" class="admin-portal-shell">
     <header class="admin-portal-topbar">
       <button type="button" class="admin-portal-brand" @click="navigateToPublicSite"><img class="scanner-brand-mark" src="/mascot-profile.png" alt="" /><span>COBRA <span>MEMESCOPE</span></span></button>
       <div class="admin-portal-label"><span></span> PRIVATE ADMIN PORTAL <b>/</b> {{ adminRole ? adminRole.toUpperCase() : 'WALLET ACCESS REQUIRED' }}</div>
@@ -1039,8 +1018,10 @@ onUnmounted(() => {
         <nav class="admin-portal-tabs" aria-label="Admin sections">
           <button type="button" :class="{ active: adminSection === 'content' }" @click="adminSection = 'content'">Site content</button>
           <button v-if="adminRole === 'owner'" type="button" :class="{ active: adminSection === 'donors' }" @click="adminSection = 'donors'; void loadDonorDashboard()">Donor activity</button>
+          <button type="button" :class="{ active: adminSection === 'chat' }" @click="adminSection = 'chat'">Admin chat</button>
         </nav>
         <AdminContentDashboard v-if="adminSection === 'content'" :token="walletSession.token" :role="adminRole" @theme-updated="applySiteTheme" />
+        <AdminChatDashboard v-else-if="adminSection === 'chat'" :token="walletSession.token" :wallet-address="walletSession.address" :role="adminRole" />
         <OwnerDonorDashboard v-else-if="adminRole === 'owner'" :dashboard="donorDashboard" :loading="donorDashboardLoading" :error="donorDashboardError" @refresh="loadDonorDashboard" />
       </section>
       <section v-else class="admin-portal-gate">
@@ -1350,6 +1331,31 @@ onUnmounted(() => {
     <MarketCoinDetail :coin="selectedMarketCoin" @close="selectedMarketCoin = null" @scan="scanTrendingCoin" />
     <CoinMarketDetail :coin="selectedListedCoin" @close="selectedListedCoin = null" />
       <AssistantChat :scan-context="assistantScanContext" :auth-token="walletSession?.token || ''" />
+  </div>
+
+  <div v-if="bannedUser" class="banned-access-shell">
+    <div class="banned-access-backdrop">
+      <div class="banned-access-card" role="alertdialog" aria-modal="true" aria-labelledby="banned-user-title">
+        <div class="banned-access-crest" aria-hidden="true">
+          <img src="/icons/cobra-192.png" alt="" />
+          <span class="banned-access-slash"></span>
+          <span class="banned-access-alert">!</span>
+        </div>
+        <h1 id="banned-user-title">You're <span>Banned</span></h1>
+        <p class="banned-access-subline">of <strong>Cobra Memescope</strong></p>
+        <div class="banned-access-panel">
+          <div class="banned-access-panel-header">
+            <span class="banned-access-warning" aria-hidden="true">!</span>
+            <strong>Violation</strong>
+          </div>
+          <p>{{ bannedUser.reason || 'You have been banned due to a violation of our community rules and terms of service.' }}</p>
+        </div>
+        <button type="button" class="banned-signout-button" @click="handleBannedSignOut">
+          <span class="banned-signout-icon" aria-hidden="true">↪</span>
+          Sign Out
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -2776,93 +2782,136 @@ onUnmounted(() => {
   }
 }
 .banned-access-shell {
-  min-height: 100vh;
+  position: fixed;
+  z-index: 10000;
+  inset: 0;
   display: grid;
   place-items: center;
-  background:
-    radial-gradient(circle at 50% 16%, rgba(255, 135, 63, 0.18), transparent 22%),
-    linear-gradient(180deg, rgba(9, 16, 17, 0.92), rgba(13, 18, 19, 0.96));
+  padding: 18px;
+  overflow-y: auto;
+  background: rgba(3, 5, 11, 0.78);
+  backdrop-filter: blur(5px);
   color: #f6f5ef;
 }
 
 .banned-access-backdrop {
-  width: min(100%, 760px);
-  padding: 28px;
+  width: min(100%, 476px);
+  margin: auto;
 }
 
 .banned-access-card {
   position: relative;
   display: grid;
   justify-items: center;
-  gap: 12px;
-  padding: 26px 28px 24px;
-  border: 1px solid rgba(255, 143, 92, 0.45);
-  border-radius: 26px;
-  background: linear-gradient(180deg, rgba(38, 14, 7, 0.94), rgba(17, 10, 10, 0.96));
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48), inset 0 0 28px rgba(255, 121, 64, 0.12);
+  gap: 10px;
+  padding: 28px 28px 26px;
+  border: 1px solid rgba(255, 86, 28, 0.78);
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse at 50% 15%, rgba(120, 26, 13, 0.25), transparent 48%),
+    linear-gradient(180deg, rgba(15, 11, 15, 0.99), rgba(8, 8, 13, 0.99));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.72), 0 0 24px rgba(255, 67, 19, 0.15), inset 0 0 0 1px rgba(255, 124, 54, 0.1);
   text-align: center;
 }
 
-.banned-access-crown {
-  position: absolute;
-  top: 18px;
-  right: 24px;
-  color: rgba(255, 234, 209, 0.74);
-  font-size: 1.1rem;
-}
-
 .banned-access-crest {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 178px;
-  height: 178px;
+  width: 156px;
+  height: 156px;
+  margin: -80px 0 8px;
   border-radius: 50%;
-  background: radial-gradient(circle at center, rgba(255, 98, 56, 0.08), rgba(255, 43, 0, 0.28) 62%, rgba(0, 0, 0, 0.28));
-  box-shadow: inset 0 0 0 8px rgba(255, 176, 98, 0.18), 0 0 34px rgba(255, 94, 0, 0.18);
+  background: radial-gradient(circle, rgba(255, 61, 25, 0.25), rgba(14, 8, 12, 0.08) 68%);
+  filter: drop-shadow(0 10px 24px rgba(239, 51, 22, 0.28));
 }
 
-.banned-access-circle {
-  display: grid;
-  place-items: center;
-  width: 116px;
-  height: 116px;
+.banned-access-crest::before {
+  position: absolute;
+  inset: 8px;
+  border: 7px solid #ec321f;
   border-radius: 50%;
-  border: 8px solid rgba(255, 218, 177, 0.9);
-  background: rgba(15, 14, 16, 0.92);
-  color: #ffb77a;
-  font-size: 3rem;
-  box-shadow: inset 0 0 18px rgba(255, 170, 96, 0.15);
+  box-shadow: 0 0 0 4px rgba(10, 8, 11, 0.9), inset 0 0 16px rgba(255, 48, 25, 0.18), 0 0 16px rgba(255, 58, 28, 0.38);
+  content: '';
+}
+
+.banned-access-crest img {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.banned-access-slash {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 150px;
+  height: 9px;
+  border: 1px solid #ff6d43;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #ff4d31, #c9151d);
+  box-shadow: 0 0 8px rgba(255, 44, 27, 0.8);
+  transform: rotate(-48deg);
+}
+
+.banned-access-alert {
+  position: absolute;
+  right: 17px;
+  bottom: 1px;
+  display: grid;
+  width: 38px;
+  height: 34px;
+  place-items: center;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: #e72c21;
+  color: #fff3e8;
+  font-size: 18px;
+  font-weight: 900;
+  padding-top: 9px;
+  filter: drop-shadow(0 0 6px rgba(255, 53, 30, 0.7));
 }
 
 .banned-access-card h1 {
   margin: 0;
-  color: #f9d0a6;
-  font-size: clamp(2.8rem, 4vw, 5rem);
-  line-height: 0.96;
-  letter-spacing: -0.08em;
+  color: #f6f3f1;
+  font-family: Manrope, sans-serif;
+  font-size: clamp(2.5rem, 8vw, 3.65rem);
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: -0.07em;
   font-weight: 900;
   text-transform: none;
 }
 
+.banned-access-card h1 span {
+  color: #f33c25;
+}
+
 .banned-access-subline {
   margin: 0;
-  color: #ff8d4d;
-  font-size: 1.2rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+  color: #f3efeb;
+  font-size: 1.24rem;
+  font-weight: 600;
   text-transform: none;
+}
+
+.banned-access-subline strong {
+  color: #ff5b24;
+  font-size: 1.3rem;
+  font-weight: 800;
 }
 
 .banned-access-panel {
   width: 100%;
-  max-width: 560px;
   display: grid;
-  gap: 10px;
-  padding: 20px 22px;
-  border: 1px solid rgba(255, 136, 82, 0.35);
-  border-radius: 18px;
-  background: rgba(63, 20, 15, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(255, 194, 137, 0.12);
+  gap: 8px;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(203, 54, 37, 0.5);
+  border-radius: 12px;
+  background: rgba(39, 13, 17, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(255, 194, 137, 0.04);
   text-align: left;
 }
 
@@ -2870,48 +2919,47 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #ffae7e;
-  font-size: 0.8rem;
-  letter-spacing: 0.18em;
+  color: #ff443d;
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .banned-access-warning {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: rgba(255, 110, 63, 0.18);
-  font-size: 0.82rem;
+  border: 2px solid currentColor;
+  font-size: 0.9rem;
+  font-weight: 900;
 }
 
 .banned-access-panel p {
   margin: 0;
-  color: #f3cec0;
-  font-size: 1.08rem;
+  color: #f0e9e7;
+  font-size: 0.96rem;
   line-height: 1.5;
 }
 
-.banned-access-panel small {
-  color: #ffd1af;
-  font-size: 0.9rem;
-  line-height: 1.6;
-}
-
 .banned-signout-button {
-  width: min(100%, 560px);
-  min-height: 58px;
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
   border: none;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #ff6d42 0%, #d74327 100%);
+  border-radius: 28px;
+  background: linear-gradient(180deg, #f13527 0%, #ca241e 100%);
   color: white;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 1rem;
+  font-weight: 700;
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
-  box-shadow: 0 12px 28px rgba(214, 61, 31, 0.32);
+  box-shadow: 0 10px 24px rgba(214, 42, 31, 0.3);
 }
 
 .banned-signout-button:hover {
@@ -2919,28 +2967,29 @@ onUnmounted(() => {
   box-shadow: 0 16px 32px rgba(214, 61, 31, 0.4);
 }
 
+.banned-signout-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
 @media (max-width: 640px) {
   .banned-access-backdrop {
-    padding: 18px;
+    width: min(100%, 420px);
   }
 
   .banned-access-card {
-    padding: 22px 18px 20px;
+    padding: 24px 18px 20px;
   }
 
   .banned-access-crest {
-    width: 136px;
-    height: 136px;
+    width: 132px;
+    height: 132px;
+    margin-top: -70px;
   }
 
-  .banned-access-circle {
-    width: 90px;
-    height: 90px;
-    font-size: 2.3rem;
-  }
-
-  .banned-access-panel {
-    padding: 16px 18px;
+  .banned-access-crest img {
+    width: 94px;
+    height: 94px;
   }
 }
 </style>

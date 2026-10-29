@@ -168,6 +168,16 @@ export type AdminUser = {
   invitedCount: number
 }
 
+export type AdminChatMessage = {
+  id: string
+  senderWalletAddress: string
+  senderName: string
+  message: string
+  attachmentName: string | null
+  attachmentContentType: string | null
+  createdAt: string
+}
+
 export type AdminInviteLeader = Pick<AdminUser, 'identityKey' | 'email' | 'username' | 'authType' | 'createdAt' | 'invitedCount'>
 
 export type SeasonalTheme = 'none' | 'christmas' | 'halloween' | 'new-year'
@@ -252,6 +262,10 @@ export async function askMemeScopeAssistant(
 async function readApiResponse<T extends { error?: string }>(response: Response, fallbackError: string): Promise<T> {
   const body = await response.text()
   if (!body) return {} as T
+  const contentType = response.headers.get('content-type')?.toLowerCase() || ''
+  if (contentType.includes('text/html') || /^\s*</.test(body)) {
+    return { error: fallbackError } as T
+  }
   try {
     return JSON.parse(body) as T
   } catch {
@@ -297,18 +311,24 @@ export async function fetchDonorDashboard(token: string): Promise<DonorDashboard
   const response = await fetch(`${apiBaseUrl}/api/admin/donors`, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  const payload = await response.json() as DonorDashboard & { error?: string }
+  const payload = await readApiResponse<DonorDashboard & { error?: string }>(response, 'Could not load the private donor dashboard.')
   if (!response.ok) throw new Error(payload.error || 'Could not load the private donor dashboard.')
   return payload
 }
 
 async function adminRequest<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
-  })
-  const payload = response.status === 204 ? null : await response.json() as { error?: string }
-  if (!response.ok) throw new Error(payload?.error || 'The private admin request failed.')
+  let response: Response
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
+    })
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error('Could not reach the Cobra MemeScope API. Check that the backend is running and the API URL is correct.')
+    throw error
+  }
+  const payload = await readApiResponse<T & { error?: string }>(response, 'The private admin request failed.')
+  if (!response.ok) throw new Error(payload.error || 'The private admin request failed.')
   return payload as T
 }
 
@@ -316,9 +336,52 @@ export function fetchAdminAccess(token: string): Promise<{ role: 'owner' | 'staf
   return adminRequest(token, '/api/admin/access')
 }
 
+export async function fetchAdminChatMessages(token: string): Promise<AdminChatMessage[]> {
+  const payload = await adminRequest<{ messages?: AdminChatMessage[] }>(token, '/api/admin/chat/messages')
+  if (!Array.isArray(payload.messages)) throw new Error('The admin chat messages were not returned.')
+  return payload.messages
+}
+
+export async function sendAdminChatMessage(token: string, message: string): Promise<AdminChatMessage> {
+  const payload = await adminRequest<{ message?: AdminChatMessage }>(token, '/api/admin/chat/messages', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  })
+  if (!payload.message?.id) throw new Error('The sent message was not returned.')
+  return payload.message
+}
+
+export async function uploadAdminChatAttachment(token: string, file: File, contentType: string, message: string): Promise<AdminChatMessage> {
+  const url = new URL(`${apiBaseUrl}/api/admin/chat/attachments`, window.location.origin)
+  if (message) url.searchParams.set('message', message)
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `******`,
+      'Content-Type': contentType,
+      'X-File-Name': encodeURIComponent(file.name),
+    },
+    body: file,
+  })
+  const payload = await readApiResponse<{ message?: AdminChatMessage; error?: string }>(response, 'Could not upload this chat attachment.')
+  if (!response.ok || !payload.message?.id) throw new Error(payload.error || 'Could not upload this chat attachment.')
+  return payload.message
+}
+
+export async function fetchAdminChatAttachment(token: string, messageId: string): Promise<Blob> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/chat/messages/${encodeURIComponent(messageId)}/attachment`, {
+    headers: { Authorization: `******` },
+  })
+  if (!response.ok) {
+    const payload = await readApiResponse<{ error?: string }>(response, 'Could not load this chat attachment.')
+    throw new Error(payload.error || 'Could not load this chat attachment.')
+  }
+  return response.blob()
+}
+
 export async function fetchLandingEvents(): Promise<LandingEvent[]> {
   const response = await fetch(`${apiBaseUrl}/api/content/events`)
-  const payload = await response.json() as { events?: LandingEvent[]; error?: string }
+  const payload = await readApiResponse<{ events?: LandingEvent[]; error?: string }>(response, 'Could not load landing events.')
   if (!response.ok || !Array.isArray(payload.events)) throw new Error(payload.error || 'Could not load landing events.')
   return payload.events
 }

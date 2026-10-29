@@ -134,6 +134,9 @@ if (process.env.VERCEL !== '1' && process.env.NODE_ENV === 'production' && exist
 
 app.use((error, _request, response, _next) => {
   console.error(error.message)
+  if (error.type === 'entity.too.large') {
+    return response.status(413).json({ error: 'The uploaded file exceeds the allowed size limit.' })
+  }
   if (!process.env.DATABASE_URL) {
     return response.status(503).json({ error: 'DATABASE_URL is not configured in the backend environment.' })
   }

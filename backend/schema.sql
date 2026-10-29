@@ -110,6 +110,25 @@ CREATE TABLE IF NOT EXISTS landing_event_images (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS admin_chat_messages (
+  id BIGSERIAL PRIMARY KEY,
+  sender_identity_key TEXT NOT NULL,
+  sender_wallet_address TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  attachment_name TEXT,
+  attachment_content_type TEXT,
+  attachment_data BYTEA,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT admin_chat_message_has_content CHECK (message <> '' OR attachment_data IS NOT NULL),
+  CONSTRAINT admin_chat_attachment_fields_match CHECK (
+    (attachment_data IS NULL AND attachment_name IS NULL AND attachment_content_type IS NULL)
+    OR (attachment_data IS NOT NULL AND attachment_name IS NOT NULL AND attachment_content_type IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS admin_chat_messages_created_at_idx
+  ON admin_chat_messages (created_at, id);
+
 CREATE TABLE IF NOT EXISTS site_settings (
   setting_key TEXT PRIMARY KEY,
   setting_value TEXT NOT NULL,

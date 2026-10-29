@@ -4,6 +4,7 @@ import { rateLimit } from 'express-rate-limit'
 import bs58 from 'bs58'
 import { ADMIN_WALLET_ADDRESS, requireAdminWalletAuth, requireOwnerOrStaffWalletAuth, requireOwnerWalletAuth } from '../middleware/auth.js'
 import { query } from '../db.js'
+import { createAdminChatMessage, getAdminChatAttachment, listAdminChatMessages } from '../services/adminChat.js'
 import { getDonorDashboard } from '../services/donorActivity.js'
 import { addStaffWallet, deleteLandingEvent, deleteStaffWallet, listLandingEvents, listStaffWallets, saveLandingEvent, saveLandingEventImage } from '../services/landingContent.js'
 import { saveSeasonalTheme, seasonalThemes } from '../services/siteTheme.js'
@@ -12,6 +13,117 @@ const router = Router()
 const dashboardLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false })
 const eventImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 const eventImageUpload = express.raw({ type: [...eventImageTypes], limit: '5mb' })
+const adminChatAttachmentTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf', 'text/plain', 'text/csv'])
+const adminChatAttachmentUpload = express.raw({ type: [...adminChatAttachmentTypes], limit: '8mb' })
+const adminChatLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false })
+
+function hasValidChatAttachment(contentType, file) {
+  if (!Buffer.isBuffer(file) || !file.length) return false
+  if (contentType === 'image/jpeg') return file.length >= 3 && file[0] === 0xff && file[1] === 0xd8 && file[2] === 0xff
+  if (contentType === 'image/png') return file.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  if (contentType === 'image/webp') return file.length >= 12 && file.toString('ascii', 0, 4) === 'RIFF' && file.toString('ascii', 8, 12) === 'WEBP'
+  if (contentType === 'image/gif') return file.toString('ascii', 0, 3) === 'GIF'
+  if (contentType === 'application/pdf') return file.subarray(0, 5).toString('ascii') === '%PDF-'
+  if (contentType === 'text/plain' || contentType === 'text/csv') {
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(file)
+      return !file.includes(0)
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
+function extensionMatchesContentType(contentType, name) {
+  const extension = name.split('.').pop()?.toLowerCase()
+  const allowedExtensions = {
+    'image/jpeg': ['jpg', 'jpeg'],
+    'image/png': ['png'],
+    'image/webp': ['webp'],
+    'image/gif': ['gif'],
+    'application/pdf': ['pdf'],
+    'text/plain': ['txt'],
+    'text/csv': ['csv'],
+  }
+  return allowedExtensions[contentType]?.includes(extension) === true
+}
+
+function cleanAttachmentName(value) {
+  let name
+  try {
+    name = decodeURIComponent(String(value || ''))
+  } catch {
+    return ''
+  }
+  return name.replace(/[\\/\u0000-\u001f\u007f"]/g, '_').trim().slice(0, 180)
+}
+
+router.get('/chat/messages', adminChatLimiter, requireOwnerOrStaffWalletAuth, async (_request, response, next) => {
+  try {
+    response.set('Cache-Control', 'private, no-store')
+    response.json({ messages: await listAdminChatMessages() })
+  } catch (error) { next(error) }
+})
+
+router.post('/chat/messages', adminChatLimiter, requireOwnerOrStaffWalletAuth, async (request, response, next) => {
+  const message = String(request.body?.message || '').trim()
+  if (!message || message.length > 2000) {
+    return response.status(400).json({ error: 'Write a message of 1–2,000 characters.' })
+  }
+  try {
+    response.status(201).json({
+      message: await createAdminChatMessage({
+        identityKey: request.user.id,
+        walletAddress: request.user.walletAddress,
+        message,
+      }),
+    })
+  } catch (error) { next(error) }
+})
+
+router.post('/chat/attachments', adminChatLimiter, requireOwnerOrStaffWalletAuth, adminChatAttachmentUpload, async (request, response, next) => {
+  const contentType = request.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase()
+  const name = cleanAttachmentName(request.get('X-File-Name'))
+  const message = String(request.query.message || '').trim()
+  if (
+    !adminChatAttachmentTypes.has(contentType)
+    || !hasValidChatAttachment(contentType, request.body)
+    || !name
+    || !extensionMatchesContentType(contentType, name)
+  ) {
+    return response.status(400).json({ error: 'Upload a valid JPEG, PNG, WebP, GIF, PDF, TXT, or CSV file.' })
+  }
+  if (message.length > 2000) return response.status(400).json({ error: 'Message text must be 2,000 characters or fewer.' })
+  try {
+    response.status(201).json({
+      message: await createAdminChatMessage({
+        identityKey: request.user.id,
+        walletAddress: request.user.walletAddress,
+        message,
+        attachment: { name, contentType, data: request.body },
+      }),
+    })
+  } catch (error) { next(error) }
+})
+
+router.get('/chat/messages/:id/attachment', adminChatLimiter, requireOwnerOrStaffWalletAuth, async (request, response, next) => {
+  if (!/^\d+$/.test(request.params.id)) return response.status(400).json({ error: 'Invalid message id.' })
+  try {
+    const attachment = await getAdminChatAttachment(request.params.id)
+    if (!attachment) return response.status(404).json({ error: 'Chat attachment not found.' })
+    const safeName = attachment.attachment_name.replace(/[\\/\u0000-\u001f\u007f"]/g, '_')
+    const asciiName = safeName.replace(/[^\x20-\x7e]/g, '_')
+    response.set({
+      'Cache-Control': 'private, no-store',
+      'Content-Type': attachment.attachment_content_type,
+      'Content-Length': attachment.attachment_data.length,
+      'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(attachment.attachment_name)}`,
+      'X-Content-Type-Options': 'nosniff',
+    })
+    response.send(attachment.attachment_data)
+  } catch (error) { next(error) }
+})
 
 function hasValidImageSignature(contentType, image) {
   if (!Buffer.isBuffer(image)) return false
@@ -46,6 +158,8 @@ function normalizeLandingEvent(input) {
   if (event.eventDate.length > 100) throw new Error('Event date must be 100 characters or fewer.')
   if (!event.cta || event.cta.length > 80) throw new Error('Enter button text (up to 80 characters).')
   if (event.imageUrl) {
+    const uploadedImagePath = /^\/api\/content\/event-images\/[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
+    if (uploadedImagePath.test(event.imageUrl)) return event
     let imageUrl
     try { imageUrl = new URL(event.imageUrl) } catch { throw new Error('Image URL must be a valid HTTPS link.') }
     const isLocalDevelopmentUrl = imageUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(imageUrl.hostname)
