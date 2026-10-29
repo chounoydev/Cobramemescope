@@ -45,6 +45,7 @@ const minimumLiquidityUsd = 5_000
 const minimumVolume24hUsd = 1_000
 const dumpThreshold24h = -20
 const cacheTtlMs = 60_000
+const staleCacheTtlMs = 10 * 60_000
 const geckoDiscoveryCacheTtlMs = 5 * 60_000
 const chartCacheTtlMs = 20_000
 const chartPointsCache = new Map()
@@ -594,12 +595,30 @@ export async function getTrendingMemecoinDetails(chainId, address, interval = '1
 
 export async function getTrendingMemecoins(limit = maxTrendingCoins) {
   const safeLimit = Math.min(Math.max(Number(limit) || maxTrendingCoins, 1), maxTrendingCoins)
-  if (cachedCoins && Date.now() - cachedAt < cacheTtlMs) return cachedCoins.slice(0, safeLimit)
-  if (pendingUpdate) return (await pendingUpdate).slice(0, safeLimit)
+  if (cachedCoins && Date.now() - cachedAt < cacheTtlMs) {
+    return { coins: cachedCoins.slice(0, safeLimit), updatedAt: new Date(cachedAt).toISOString(), stale: false }
+  }
+  if (pendingUpdate) {
+    try {
+      const coins = await pendingUpdate
+      return { coins: coins.slice(0, safeLimit), updatedAt: new Date(cachedAt).toISOString(), stale: false }
+    } catch (error) {
+      if (cachedCoins && Date.now() - cachedAt < staleCacheTtlMs) {
+        return { coins: cachedCoins.slice(0, safeLimit), updatedAt: new Date(cachedAt).toISOString(), stale: true }
+      }
+      throw error
+    }
+  }
 
   pendingUpdate = updateTrendingCoins(maxTrendingCoins)
   try {
-    return await pendingUpdate
+    const coins = await pendingUpdate
+    return { coins: coins.slice(0, safeLimit), updatedAt: new Date(cachedAt).toISOString(), stale: false }
+  } catch (error) {
+    if (cachedCoins && Date.now() - cachedAt < staleCacheTtlMs) {
+      return { coins: cachedCoins.slice(0, safeLimit), updatedAt: new Date(cachedAt).toISOString(), stale: true }
+    }
+    throw error
   } finally {
     pendingUpdate = null
   }

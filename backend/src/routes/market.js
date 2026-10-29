@@ -46,9 +46,16 @@ router.get('/trending', trendingLimiter, async (request, response, next) => {
   const limit = Math.min(Math.max(requestedLimit, 1), 50)
 
   try {
-    const coins = await getTrendingMemecoins(limit)
+    const result = await getTrendingMemecoins(limit)
     response.set('Cache-Control', 'public, max-age=30')
-    response.json({ coins, updatedAt: new Date().toISOString(), windowDays: 30, refreshSeconds: 60, excludedChange24h: -20 })
+    response.json({
+      coins: result.coins,
+      updatedAt: result.updatedAt,
+      windowDays: 30,
+      refreshSeconds: 60,
+      excludedChange24h: -20,
+      stale: result.stale,
+    })
   } catch (error) {
     next(error)
   }

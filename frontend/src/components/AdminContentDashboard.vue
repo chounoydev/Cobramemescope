@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
   addStaffWallet,
   banAdminUser,
@@ -60,6 +60,7 @@ const banTarget = ref<AdminUser | null>(null)
 const banReason = ref('')
 const userSaving = ref(false)
 let userLoadSequence = 0
+let userRefreshTimer: number | undefined
 const eventForm = reactive({ badge: '', title: '', description: '', eventDate: '', cta: '', imageUrl: '' })
 const themeOptions: { id: SeasonalTheme; label: string; description: string; icon: string }[] = [
   { id: 'none', label: 'Default', description: 'Keep the standard Cobra MemeScope background.', icon: '◐' },
@@ -230,11 +231,13 @@ async function revokeStaffAccess(member: StaffWallet) {
   }
 }
 
-async function loadUsers(offset = 0) {
+async function loadUsers(offset = 0, quiet = false) {
   const sequence = ++userLoadSequence
   usersLoading.value = true
-  userError.value = ''
-  userNotice.value = ''
+  if (!quiet) {
+    userError.value = ''
+    userNotice.value = ''
+  }
   try {
     const result = await fetchAdminUsers(props.token, userSearch.value.trim(), 'all', offset)
     if (sequence !== userLoadSequence) return
@@ -344,7 +347,18 @@ function shortAddress(address: string) {
   return `${address.slice(0, 7)}…${address.slice(-6)}`
 }
 
-onMounted(() => { void loadDashboard() })
+onMounted(() => {
+  void loadDashboard()
+  userRefreshTimer = window.setInterval(() => {
+    if (activeSection.value === 'users' && !usersLoading.value) {
+      void loadUsers(userOffset.value, true)
+    }
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (userRefreshTimer !== undefined) window.clearInterval(userRefreshTimer)
+})
 </script>
 
 <template>
@@ -480,7 +494,7 @@ onMounted(() => { void loadDashboard() })
           </div>
           <button type="button" class="admin-primary" :disabled="usersLoading" @click="loadUsers(userOffset)">{{ usersLoading ? 'LOADING…' : 'REFRESH LIST' }}</button>
         </div>
-        <p class="admin-staff-note">Search by username, email, or wallet address. Ban actions require a recorded violation reason; banned users can be unbanned here.</p>
+        <p class="admin-staff-note">Email and wallet signups appear here and refresh automatically while this directory is open. Search by username, email, or wallet address. Ban actions require a recorded violation reason; banned users can be unbanned here.</p>
         <form class="admin-user-search" role="search" @submit.prevent="searchUsers">
           <label for="user-search-input">Search accounts</label>
           <input id="user-search-input" v-model="userSearch" type="search" maxlength="100" placeholder="Enter a username, email, or wallet address" />

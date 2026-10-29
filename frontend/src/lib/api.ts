@@ -259,9 +259,9 @@ async function readApiResponse<T extends { error?: string }>(response: Response,
   }
 }
 
-export async function fetchTrendingMemecoins(): Promise<{ coins: TrendingMemecoin[]; updatedAt: string; windowDays: number; refreshSeconds: number; excludedChange24h: number }> {
+export async function fetchTrendingMemecoins(): Promise<{ coins: TrendingMemecoin[]; updatedAt: string; windowDays: number; refreshSeconds: number; excludedChange24h: number; stale: boolean }> {
   const response = await fetch(`${apiBaseUrl}/api/market/trending?limit=50`)
-  const payload = await readApiResponse<{ coins?: TrendingMemecoin[]; updatedAt?: string; windowDays?: number; refreshSeconds?: number; excludedChange24h?: number; error?: string }>(response, 'Could not load new market launches.')
+  const payload = await readApiResponse<{ coins?: TrendingMemecoin[]; updatedAt?: string; windowDays?: number; refreshSeconds?: number; excludedChange24h?: number; stale?: boolean; error?: string }>(response, 'Could not load new market launches.')
   if (!response.ok || !Array.isArray(payload.coins)) throw new Error(payload.error || 'Could not load new market launches.')
   return {
     coins: payload.coins,
@@ -269,6 +269,7 @@ export async function fetchTrendingMemecoins(): Promise<{ coins: TrendingMemecoi
     windowDays: payload.windowDays || 30,
     refreshSeconds: payload.refreshSeconds || 60,
     excludedChange24h: payload.excludedChange24h ?? -20,
+    stale: payload.stale === true,
   }
 }
 

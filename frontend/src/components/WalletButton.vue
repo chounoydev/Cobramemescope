@@ -65,6 +65,7 @@ type PhantomDeepLinkState = {
 const emit = defineEmits<{
   'wallet-session': [session: WalletSession]
   'wallet-signed-out': []
+  'wallet-banned': [reason: string]
   'account-deleted': []
 }>()
 
@@ -488,6 +489,15 @@ function readableError(error: unknown) {
   return 'Could not sign in. Check your connection and try again.'
 }
 
+function handleBannedAccount(error: unknown) {
+  const message = readableError(error)
+  if (!/banned/i.test(message)) return false
+  emit('wallet-banned', message)
+  clearConnection()
+  emit('wallet-signed-out')
+  return true
+}
+
 function isUnsupportedWalletPath(error: unknown) {
   const code = (error as { code?: number })?.code
   const message = error instanceof Error ? error.message : String(error || '')
@@ -577,6 +587,7 @@ async function restoreWalletSession() {
     emit('wallet-session', { address: savedAddress, token, authType: authType.value, username: username.value, avatarSeed: profile.avatarSeed })
     void loadReferralStats()
   } catch (error) {
+    if (handleBannedAccount(error)) return
     errorMessage.value = readableError(error)
   }
 }
@@ -837,6 +848,7 @@ async function connectEvm(provider: EvmProvider, name: string) {
     provider.on?.('accountsChanged', accountListener)
     provider.on?.('chainChanged', chainListener)
   } catch (error) {
+    if (handleBannedAccount(error)) return
     errorMessage.value = readableError(error)
   } finally {
     connecting.value = false
@@ -875,6 +887,7 @@ async function connectSolana(provider: SolanaProvider, name: string) {
     }
     provider.on?.('accountChanged', accountListener)
   } catch (error) {
+    if (handleBannedAccount(error)) return
     if (name === 'Phantom' && isPhantomMobileEnvironment() && isUnsupportedWalletPath(error) && !sessionStorage.getItem(phantomBrowserHandoffKey)) {
       startPhantomMobileConnection()
     } else {
@@ -920,6 +933,7 @@ async function finishEmailAuth() {
     emailPassword.value = ''
     confirmPassword.value = ''
   } catch (error) {
+    if (handleBannedAccount(error)) return
     errorMessage.value = readableError(error)
     if (emailMode.value === 'signup' && /username.*already taken/i.test(errorMessage.value)) {
       usernameAvailability.value = 'taken'
@@ -1147,6 +1161,7 @@ async function resumePhantomDeepLink(returnedUrl = window.location.href) {
     return true
   } catch (error) {
     sessionStorage.removeItem(phantomDeepLinkStateKey)
+    if (handleBannedAccount(error)) return true
     errorMessage.value = readableError(error)
     dialogOpen.value = true
     return true

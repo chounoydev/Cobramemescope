@@ -143,12 +143,52 @@ const halloweenBats = [
 const halloweenMessageVisible = ref(false)
 let halloweenMessageTimer: number | undefined
 let siteThemeLoadErrorLogged = false
+const trendingFeedCacheStorageKey = 'memescope-trending-feed-cache-v1'
+const trendingFeedCacheMaxAgeMs = 6 * 60 * 60 * 1000
 const trendingWatchlistStorageKey = 'memescope-trending-watchlist'
 const explicitTrendingWatchlistMigrationKey = 'memescope-explicit-trending-watchlist-v1'
 const watchlistAlertsStorageKey = 'memescope-watchlist-alerts'
 const donationNotificationsStorageKey = 'memescope-donation-notifications'
 const notificationSoundStorageKey = 'memescope-notification-sound'
 const favoritePriceMonitorsStorageKey = 'memescope-favorite-price-monitors'
+
+function isTrendingMemecoin(value: unknown): value is TrendingMemecoin {
+  if (!value || typeof value !== 'object') return false
+  const coin = value as Record<string, unknown>
+  return typeof coin.address === 'string'
+    && typeof coin.chainId === 'string'
+    && typeof coin.chain === 'string'
+    && typeof coin.name === 'string'
+    && typeof coin.symbol === 'string'
+    && typeof coin.risk === 'object'
+    && coin.risk !== null
+}
+
+function readCachedTrendingFeed() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(trendingFeedCacheStorageKey) || 'null') as {
+      coins?: unknown
+      updatedAt?: unknown
+    } | null
+    if (!cached || !Array.isArray(cached.coins) || typeof cached.updatedAt !== 'string') return null
+    const updatedAt = new Date(cached.updatedAt)
+    if (!Number.isFinite(updatedAt.getTime()) || Date.now() - updatedAt.getTime() > trendingFeedCacheMaxAgeMs) return null
+    const coins = cached.coins.filter(isTrendingMemecoin)
+    return coins.length ? { coins, updatedAt } : null
+  } catch (error) {
+    console.warn('Could not read the cached launch feed:', error)
+    return null
+  }
+}
+
+function cacheTrendingFeed(coins: TrendingMemecoin[], updatedAt: string) {
+  if (!coins.length) return
+  try {
+    localStorage.setItem(trendingFeedCacheStorageKey, JSON.stringify({ coins, updatedAt }))
+  } catch (error) {
+    console.warn('Could not cache the launch feed in this browser:', error)
+  }
+}
 
 if (localStorage.getItem(explicitTrendingWatchlistMigrationKey) !== 'done') {
   localStorage.removeItem(trendingWatchlistStorageKey)
@@ -263,13 +303,14 @@ const assistantScanContext = computed(() => {
 })
 const scanLoading = ref(false)
 const scanError = ref('')
-const trendingCoins = ref<TrendingMemecoin[]>([])
+const cachedTrendingFeed = readCachedTrendingFeed()
+const trendingCoins = ref<TrendingMemecoin[]>(cachedTrendingFeed?.coins ?? [])
 const liquidityChanges = ref<Record<string, { amount: number; percent: number } | null>>({})
 const selectedMarketCoin = ref<TrendingMemecoin | null>(null)
 const selectedListedCoin = ref<Coin | null>(null)
 const trendingLoading = ref(false)
 const trendingError = ref('')
-const trendingUpdatedAt = ref(new Date())
+const trendingUpdatedAt = ref(cachedTrendingFeed?.updatedAt ?? new Date())
 const trendingSearchQuery = ref('')
 const trendingMode = ref<'all' | 'fast' | 'clear' | 'boosted'>('all')
 const selectedTrendingChain = ref('all')
@@ -283,6 +324,7 @@ const notificationNow = ref(Date.now())
 let savedMarketsRefreshInProgress = false
 const savedTrendingCoins = ref<TrendingMemecoin[]>(readTrendingWatchlist())
 const walletSession = ref<WalletSession>(null)
+const bannedUser = ref<{ reason: string } | null>(null)
 const activeSeasonalTheme = computed<SeasonalTheme>(() => seasonalTheme.value)
 const adminRole = ref<'owner' | 'staff' | null>(null)
 const adminAccessError = ref('')
@@ -483,6 +525,7 @@ async function loadMarket() {
 }
 
 async function loadTrending() {
+  if (trendingLoading.value) return
   trendingLoading.value = true
   trendingError.value = ''
   try {
@@ -497,6 +540,10 @@ async function loadTrending() {
     }))
     trendingCoins.value = result.coins
     trendingUpdatedAt.value = new Date(result.updatedAt)
+    cacheTrendingFeed(result.coins, result.updatedAt)
+    if (result.stale) {
+      trendingError.value = 'The live feed is temporarily unavailable. Showing the last successful market update.'
+    }
   } catch (error) {
     trendingError.value = error instanceof Error ? error.message : 'Could not load recent launches.'
   } finally {
@@ -779,7 +826,31 @@ function handleWalletSession(session: WalletSession) {
   void loadAdminAccess(session)
 }
 
+function handleWalletBanned(reason: string) {
+  bannedUser.value = { reason: reason || 'This account is banned.' }
+  walletSession.value = null
+  adminRole.value = null
+  adminAccessError.value = ''
+  donorDashboard.value = null
+  if (isAdminPortal.value) navigateToPublicSite()
+}
+
 function handleWalletSignedOut() {
+  bannedUser.value = null
+  if (isAdminPortal.value) navigateToPublicSite()
+}
+
+function handleBannedSignOut() {
+  const sessionKeys = ['memescope-wallet-token', 'memescope-wallet-address', 'memescope-wallet-metadata', 'memescope-pending-invite-code']
+  for (const key of sessionKeys) {
+    localStorage.removeItem(key)
+    sessionStorage.removeItem(key)
+  }
+  bannedUser.value = null
+  walletSession.value = null
+  adminRole.value = null
+  adminAccessError.value = ''
+  donorDashboard.value = null
   if (isAdminPortal.value) navigateToPublicSite()
 }
 
@@ -933,12 +1004,34 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="isAdminPortal" class="admin-portal-shell">
+  <div v-if="bannedUser" class="banned-access-shell">
+    <div class="banned-access-backdrop">
+      <div class="banned-access-card" role="alertdialog" aria-modal="true" aria-labelledby="banned-user-title">
+        <div class="banned-access-crown" aria-hidden="true">✦</div>
+        <div class="banned-access-crest" aria-hidden="true">
+          <span class="banned-access-circle">⛔</span>
+        </div>
+        <h1 id="banned-user-title">You're Banned</h1>
+        <p class="banned-access-subline">of Cobra Memescope</p>
+        <div class="banned-access-panel">
+          <div class="banned-access-panel-header">
+            <span class="banned-access-warning">⚠</span>
+            <strong>Violation</strong>
+          </div>
+          <p>{{ bannedUser.reason || 'You have been banned due to a violation of our community rules and terms of service.' }}</p>
+          <small>The violation is not closed. You can only sign out for now.</small>
+        </div>
+        <button type="button" class="banned-signout-button" @click="handleBannedSignOut">Sign Out</button>
+      </div>
+    </div>
+  </div>
+
+  <div v-else-if="isAdminPortal" class="admin-portal-shell">
     <header class="admin-portal-topbar">
       <button type="button" class="admin-portal-brand" @click="navigateToPublicSite"><img class="scanner-brand-mark" src="/mascot-profile.png" alt="" /><span>COBRA <span>MEMESCOPE</span></span></button>
       <div class="admin-portal-label"><span></span> PRIVATE ADMIN PORTAL <b>/</b> {{ adminRole ? adminRole.toUpperCase() : 'WALLET ACCESS REQUIRED' }}</div>
       <div class="admin-portal-actions">
-        <WalletButton @wallet-session="handleWalletSession" @wallet-signed-out="handleWalletSignedOut" />
+        <WalletButton @wallet-session="handleWalletSession" @wallet-signed-out="handleWalletSignedOut" @wallet-banned="handleWalletBanned" />
       </div>
     </header>
     <main class="admin-portal-main">
@@ -1075,7 +1168,7 @@ onUnmounted(() => {
             </section>
           </div>
           <DonateButton @transaction="recordDonationNotification" @transaction-failed="recordDonationFailure" />
-          <WalletButton @wallet-session="handleWalletSession" @wallet-signed-out="handleWalletSignedOut" @account-deleted="handleAccountDeleted" />
+          <WalletButton @wallet-session="handleWalletSession" @wallet-signed-out="handleWalletSignedOut" @wallet-banned="handleWalletBanned" @account-deleted="handleAccountDeleted" />
         </div>
       </header>
 
@@ -1232,7 +1325,8 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-          <div v-if="trendingError" class="market-error" role="alert"><strong>Live launch feed unavailable</strong><span>{{ trendingError }}</span><button type="button" @click="loadTrending">RETRY ↻</button></div>
+          <div v-if="trendingError && trendingCoins.length" class="market-error" role="status"><strong>Showing saved launch data</strong><span>{{ trendingError }} Market values may be out of date.</span><button type="button" @click="loadTrending">RETRY ↻</button></div>
+          <div v-if="trendingError && !trendingCoins.length" class="market-error" role="alert"><strong>Live launch feed unavailable</strong><span>{{ trendingError }}</span><button type="button" @click="loadTrending">RETRY ↻</button></div>
           <div v-else-if="trendingLoading && !trendingCoins.length" class="market-loading" role="status"><span class="scan-spinner"></span><div><strong>Finding fresh launches</strong><small>Checking recent pairs, activity, liquidity, and contract reviews</small></div></div>
           <div v-else-if="trendingSearchQuery.trim() && visibleTrendingCoins.length === 0" class="market-empty"><strong>No memecoins match “{{ trendingSearchQuery.trim() }}”.</strong><span>Try another name, ticker, or contract address.</span></div>
           <div v-else-if="trendingMode === 'clear' && visibleTrendingCoins.length === 0" class="market-empty"><strong>No fully clear reviews in the current fresh pool list.</strong><span>That does not make other tokens safe; their review may have warnings or missing data.</span></div>
@@ -2679,6 +2773,174 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .landing-announcement-slide {
     animation: none;
+  }
+}
+.banned-access-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 135, 63, 0.18), transparent 22%),
+    linear-gradient(180deg, rgba(9, 16, 17, 0.92), rgba(13, 18, 19, 0.96));
+  color: #f6f5ef;
+}
+
+.banned-access-backdrop {
+  width: min(100%, 760px);
+  padding: 28px;
+}
+
+.banned-access-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 26px 28px 24px;
+  border: 1px solid rgba(255, 143, 92, 0.45);
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(38, 14, 7, 0.94), rgba(17, 10, 10, 0.96));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48), inset 0 0 28px rgba(255, 121, 64, 0.12);
+  text-align: center;
+}
+
+.banned-access-crown {
+  position: absolute;
+  top: 18px;
+  right: 24px;
+  color: rgba(255, 234, 209, 0.74);
+  font-size: 1.1rem;
+}
+
+.banned-access-crest {
+  display: grid;
+  place-items: center;
+  width: 178px;
+  height: 178px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(255, 98, 56, 0.08), rgba(255, 43, 0, 0.28) 62%, rgba(0, 0, 0, 0.28));
+  box-shadow: inset 0 0 0 8px rgba(255, 176, 98, 0.18), 0 0 34px rgba(255, 94, 0, 0.18);
+}
+
+.banned-access-circle {
+  display: grid;
+  place-items: center;
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  border: 8px solid rgba(255, 218, 177, 0.9);
+  background: rgba(15, 14, 16, 0.92);
+  color: #ffb77a;
+  font-size: 3rem;
+  box-shadow: inset 0 0 18px rgba(255, 170, 96, 0.15);
+}
+
+.banned-access-card h1 {
+  margin: 0;
+  color: #f9d0a6;
+  font-size: clamp(2.8rem, 4vw, 5rem);
+  line-height: 0.96;
+  letter-spacing: -0.08em;
+  font-weight: 900;
+  text-transform: none;
+}
+
+.banned-access-subline {
+  margin: 0;
+  color: #ff8d4d;
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.banned-access-panel {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  gap: 10px;
+  padding: 20px 22px;
+  border: 1px solid rgba(255, 136, 82, 0.35);
+  border-radius: 18px;
+  background: rgba(63, 20, 15, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 194, 137, 0.12);
+  text-align: left;
+}
+
+.banned-access-panel-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffae7e;
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.banned-access-warning {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 110, 63, 0.18);
+  font-size: 0.82rem;
+}
+
+.banned-access-panel p {
+  margin: 0;
+  color: #f3cec0;
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.banned-access-panel small {
+  color: #ffd1af;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.banned-signout-button {
+  width: min(100%, 560px);
+  min-height: 58px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ff6d42 0%, #d74327 100%);
+  color: white;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  box-shadow: 0 12px 28px rgba(214, 61, 31, 0.32);
+}
+
+.banned-signout-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(214, 61, 31, 0.4);
+}
+
+@media (max-width: 640px) {
+  .banned-access-backdrop {
+    padding: 18px;
+  }
+
+  .banned-access-card {
+    padding: 22px 18px 20px;
+  }
+
+  .banned-access-crest {
+    width: 136px;
+    height: 136px;
+  }
+
+  .banned-access-circle {
+    width: 90px;
+    height: 90px;
+    font-size: 2.3rem;
+  }
+
+  .banned-access-panel {
+    padding: 16px 18px;
   }
 }
 </style>
