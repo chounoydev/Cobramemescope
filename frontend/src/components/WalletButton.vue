@@ -1304,9 +1304,16 @@ onBeforeUnmount(() => {
 
   <Teleport to="body">
   <div v-if="dialogOpen" class="wallet-backdrop" @click.self="dialogOpen = false">
-    <section class="wallet-dialog" role="dialog" aria-modal="true" aria-labelledby="wallet-dialog-title">
+    <section class="wallet-dialog" :class="{ 'auth-dialog': !address && !profileSetup && !settingsMode }" role="dialog" aria-modal="true" aria-labelledby="wallet-dialog-title">
       <header class="dialog-header">
-        <div><span class="dialog-eyebrow">{{ settingsMode ? 'ACCOUNT PREFERENCES' : profileSetup ? 'YOUR PROFILE' : 'COBRA MEMESCOPE ACCOUNT' }}</span><h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : emailMode === 'signup' ? 'Create your account' : 'Welcome back' }}</h2></div>
+        <div class="dialog-title-block">
+          <div class="dialog-brand" v-if="!address && !profileSetup && !settingsMode">
+            <img src="/mascot-logo.png" alt="" />
+            <span><strong>COBRA</strong><small>MEMESCOPE</small></span>
+          </div>
+          <span class="dialog-eyebrow">{{ settingsMode ? 'ACCOUNT PREFERENCES' : profileSetup ? 'YOUR PROFILE' : 'COBRA MEMESCOPE ACCOUNT' }}</span>
+          <h2 id="wallet-dialog-title" :class="{ 'connected-title': address && !profileSetup }">{{ settingsMode ? 'Settings' : profileSetup ? (username ? 'Edit your profile' : 'Choose a username') : address ? 'Account connected' : emailMode === 'signup' ? 'Create your account' : 'Welcome back' }}</h2>
+        </div>
         <div class="dialog-header-actions">
           <button v-if="settingsMode && !deletionScheduledAt" class="settings-back-button" type="button" @click="settingsMode = false">‹ Profile</button>
           <button v-if="address && !profileSetup" class="account-settings-button" type="button" aria-label="Account settings" title="Account settings" :aria-expanded="settingsMode" @click="openSettings"><Settings2 :size="17" :stroke-width="1.8" /></button>
@@ -1431,8 +1438,8 @@ onBeforeUnmount(() => {
       <template v-else>
         <p class="dialog-description">{{ emailMode === 'signup' ? 'Create an account to start tracking markets.' : 'Sign in to continue to your account.' }}</p>
         <div class="auth-form-intro">
-          <span class="auth-form-mark" aria-hidden="true">{{ emailMode === 'signup' ? '+' : '↗' }}</span>
-          <div><strong>{{ emailMode === 'signup' ? 'Start with your email' : 'Continue with your email' }}</strong><small>{{ emailMode === 'signup' ? 'Your account keeps your watchlist and profile in sync.' : 'Your account is protected by your password.' }}</small></div>
+          <span class="auth-form-mark" aria-hidden="true">{{ emailMode === 'signup' ? '+' : '✓' }}</span>
+          <div><strong>{{ emailMode === 'signup' ? 'Start with your email' : 'Secure &amp; protected' }}</strong><small>{{ emailMode === 'signup' ? 'Your account keeps your watchlist and profile in sync.' : 'Your account is protected by advanced security measures.' }}</small></div>
         </div>
         <form class="email-form" @submit.prevent="finishEmailAuth">
           <template v-if="emailMode === 'signup'">
@@ -1637,6 +1644,42 @@ onBeforeUnmount(() => {
 .profile-form { display: grid; gap: 9px; }
 .wallet-error { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #633b36; border-radius: 9px; background: #281c1a; color: #ffb6a9; font-size: 12px; line-height: 1.5; }
 .wallet-dialog button:focus-visible,.wallet-dialog input:focus-visible,.wallet-dialog select:focus-visible { outline: 2px solid #a8cb5c; outline-offset: 2px; }
+.auth-dialog { width: min(100%, 470px); padding: 26px 28px 30px; border-color: #273044; border-radius: 18px; background: #07101f; background-image: radial-gradient(circle at 95% 0%, rgb(32 132 86 / 13%), transparent 30%), linear-gradient(145deg, #080f1d, #09101e 70%, #0a1422); }
+.auth-dialog .dialog-header { top: -26px; margin: -26px -28px 0; padding: 22px 28px 13px; border-bottom: 1px solid #1a2334; background: #090f1c; }
+.auth-dialog .dialog-title-block { display: grid; }
+.auth-dialog .dialog-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.auth-dialog .dialog-brand img { width: 44px; height: 44px; object-fit: contain; }
+.auth-dialog .dialog-brand span { display: grid; line-height: 1; }
+.auth-dialog .dialog-brand strong { color: #f4f7fb; font: 800 18px/1 Manrope, sans-serif; letter-spacing: -.02em; }
+.auth-dialog .dialog-brand small { margin-top: 3px; color: #b9e83d; font-size: 9px; font-weight: 850; letter-spacing: .06em; }
+.auth-dialog .dialog-eyebrow { display: none; }
+.auth-dialog .dialog-header h2 { margin-top: 4px; color: #f3f6fb; font-size: 31px; font-weight: 800; line-height: 1.08; }
+.auth-dialog .dialog-close { border-color: #263149; background: #101827; color: #edf3ff; }
+.auth-dialog .dialog-description { margin: 13px 0 16px; color: #b6bfd0; font-size: 13px; line-height: 1.5; }
+.auth-dialog .auth-form-intro { min-height: 64px; box-sizing: border-box; border-color: #3d4b1d; border-radius: 12px; background: linear-gradient(100deg, rgb(43 62 31 / 78%), rgb(18 36 37 / 68%)); box-shadow: inset 0 0 0 1px rgb(180 213 75 / 4%); }
+.auth-dialog .auth-form-mark { border-color: #7aa338; border-radius: 50%; background: #2a551d; color: #baf06b; }
+.auth-dialog .auth-form-intro strong { color: #f4f7fb; font-size: 13px; }
+.auth-dialog .auth-form-intro small { color: #aeb8c4; }
+.auth-dialog .email-form { gap: 8px; margin-top: 13px; }
+.auth-dialog .email-form label { margin-top: 7px; color: #e5e9f2; font-size: 11px; font-weight: 700; letter-spacing: 0; }
+.auth-dialog .email-form input { min-height: 52px; border-color: #273044; border-radius: 11px; background: #111827; color: #f7f9fd; }
+.auth-dialog .email-form input::placeholder { color: #718095; }
+.auth-dialog .email-form input:focus { border-color: #a4c948; background: #121b2a; box-shadow: 0 0 0 3px rgb(164 201 72 / 12%); }
+.auth-dialog .auth-field-help { color: #8f9aab; }
+.auth-dialog .email-submit { min-height: 58px; margin-top: 12px; border-radius: 12px; font-weight: 850; }
+.auth-dialog .email-submit > span:first-child { margin-left: 1px; color: #102018; font-size: 14px; }
+.auth-dialog .email-mode { min-height: 44px; border-color: transparent; background: transparent; color: #d1e67f; }
+.auth-dialog .account-note { margin: 10px 0 8px; color: #8995a7; font-size: 11px; text-align: center; }
+.auth-dialog .wallet-divider { margin: 12px 0 7px; color: #8794a7; }
+.auth-dialog .wallet-divider::before,.auth-dialog .wallet-divider::after { background: #263044; }
+.auth-dialog .wallet-options { gap: 7px; }
+.auth-dialog .wallet-choice { min-height: 64px; border-color: #263044; border-radius: 12px; background: #111827; }
+.auth-dialog .wallet-choice:hover:not(:disabled) { border-color: #8dac40; background: #172033; }
+.auth-dialog .wallet-choice-icon { width: 42px; height: 42px; flex-basis: 42px; border-radius: 50%; }
+.auth-dialog .sol-icon { background: #6337c8; color: #fff; }
+.auth-dialog .evm-icon { background: #1766b3; color: #fff; }
+.auth-dialog .wallet-choice small { color: #929db0; }
+.auth-dialog .choice-arrow { color: #b7ea4b; }
 @media (max-width: 480px) {
   .wallet-backdrop { align-items: end; padding: max(0px, env(safe-area-inset-top)) 0 0; }
   .wallet-dialog { width: 100%; max-height: calc(100dvh - env(safe-area-inset-top)); padding: 22px 18px max(22px, env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; }
