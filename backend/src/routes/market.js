@@ -2,6 +2,8 @@ import { Router } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { getMarket, getMarketCoinDetails } from '../services/marketData.js'
 import { getTrendingMemecoinDetails, getTrendingMemecoins, refreshTrackedMemecoins } from '../services/trendingMemecoins.js'
+import { getActivePromotions } from '../services/promotions.js'
+import { listCommunityTrackedTokens } from '../services/adminChat.js'
 
 const router = Router()
 const trendingLimiter = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-7', legacyHeaders: false })
@@ -33,7 +35,16 @@ router.get('/trending/:chainId/:address', detailsLimiter, async (request, respon
 
   try {
     const details = await getTrendingMemecoinDetails(chainId, address, interval)
-    if (!details) return response.status(404).json({ error: 'No market pair was found for this token.' })
+    if (!details) {
+      const promotion = (await getActivePromotions()).find((token) => token.address === address)
+      if (!promotion) return response.status(404).json({ error: 'No market pair was found for this token.' })
+      return response.json({
+        token: { name: promotion.name, symbol: promotion.symbol },
+        market: { priceUsd: null, marketCapUsd: null, fdvUsd: null, liquidityUsd: null, volume24hUsd: null, change24h: null, buys24h: null, sells24h: null, pairCreatedAt: promotion.listed_at ? Date.parse(promotion.listed_at) : null, dex: 'Cobra Promotion', pairUrl: '', holderCount: null, holderCountSource: null },
+        listings: [],
+        chart: { interval, points: [] },
+      })
+    }
     response.set('Cache-Control', 'no-store')
     response.json(details)
   } catch (error) {
@@ -43,16 +54,77 @@ router.get('/trending/:chainId/:address', detailsLimiter, async (request, respon
 
 router.get('/trending', trendingLimiter, async (request, response, next) => {
   const requestedLimit = Number.parseInt(request.query.limit, 10) || 40
-  const limit = Math.min(Math.max(requestedLimit, 1), 50)
+  const limit = Math.min(Math.max(requestedLimit, 1), 100)
 
   try {
     const result = await getTrendingMemecoins(limit)
+    const promoted = await getActivePromotions()
+    const promotedCoins = promoted.map((token, index) => ({
+      rank: index + 1,
+      address: token.address,
+      chainId: 'solana',
+      chain: 'Solana',
+      name: token.name,
+      symbol: token.symbol,
+      image: token.image,
+      pairUrl: '',
+      dex: 'Cobra Promotion',
+      ageHours: 0,
+      priceUsd: null,
+      marketCap: null,
+      marketCapUsd: null,
+      change24h: 0,
+      liquidityUsd: 0,
+      volume24h: 0,
+      buys24h: 0,
+      sells24h: 0,
+      momentumScore: 0,
+      qualityScore: null,
+      qualityTier: 'EARLY',
+      momentumLabel: 'PROMOTED LISTING',
+      promoted: true,
+      promotedVerified: true,
+      boostAmount: 0.5,
+      marketStatus: 'LIVE',
+      risk: { level: 'limited', label: 'Limited review', flaggedCount: 0, cautionCount: 0, unknownCount: 1, reasons: ['Promotion does not replace an on-chain security review.'] },
+    }))
+    const communityTokens = await listCommunityTrackedTokens()
+    const communityCoins = communityTokens.map((token) => ({
+      rank: 0,
+      address: token.address,
+      chainId: 'solana',
+      chain: 'Solana',
+      name: 'Community memecoin',
+      symbol: 'COMMUNITY',
+      image: '',
+      pairUrl: '',
+      dex: 'Cobra Community',
+      ageHours: 0,
+      priceUsd: null,
+      marketCap: null,
+      marketCapUsd: null,
+      change24h: 0,
+      liquidityUsd: 0,
+      volume24h: 0,
+      buys24h: 0,
+      sells24h: 0,
+      momentumScore: 0,
+      qualityScore: null,
+      qualityTier: 'COMMUNITY',
+      momentumLabel: 'CHAT TRACKED',
+      communityTracked: true,
+      marketStatus: 'TRACKING',
+      risk: { level: 'unknown', label: 'Community detection', flaggedCount: 0, cautionCount: 0, unknownCount: 1, reasons: ['Contract detected from public community chat. Verify the mint address.'] },
+    }))
+    const coins = [...promotedCoins, ...communityCoins, ...result.coins.filter((coin) => `${coin.chainId}:${coin.address}` !== 'solana:' && !promotedCoins.some((promo) => promo.address === coin.address) && !communityCoins.some((tracked) => tracked.address === coin.address))]
+      .slice(0, limit)
+      .map((coin, index) => ({ ...coin, rank: index + 1 }))
     response.set('Cache-Control', 'public, max-age=30')
     response.json({
-      coins: result.coins,
+      coins,
       updatedAt: result.updatedAt,
       windowDays: 30,
-      refreshSeconds: 60,
+      refreshSeconds: 30,
       excludedChange24h: -20,
       stale: result.stale,
     })

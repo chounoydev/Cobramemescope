@@ -3,11 +3,12 @@ import express from 'express'
 import { rateLimit } from 'express-rate-limit'
 import bs58 from 'bs58'
 import { ADMIN_WALLET_ADDRESS, requireAdminWalletAuth, requireOwnerOrStaffWalletAuth, requireOwnerWalletAuth } from '../middleware/auth.js'
-import { query } from '../db.js'
-import { createAdminChatMessage, getAdminChatAttachment, listAdminChatMessages } from '../services/adminChat.js'
+import { pool, query } from '../db.js'
+import { clearAdminChatConversation, createAdminChatMessage, getAdminChatAttachment, listAdminChatMessages } from '../services/adminChat.js'
 import { getDonorDashboard } from '../services/donorActivity.js'
 import { addStaffWallet, deleteLandingEvent, deleteStaffWallet, listLandingEvents, listStaffWallets, saveLandingEvent, saveLandingEventImage } from '../services/landingContent.js'
 import { saveSeasonalTheme, seasonalThemes } from '../services/siteTheme.js'
+import { awardCobraPoints, COBRA_POINTS_SUPPLY, ensureRewardsTables, getCobraPoints } from '../services/cobraPoints.js'
 
 const router = Router()
 const dashboardLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false })
@@ -16,6 +17,151 @@ const eventImageUpload = express.raw({ type: [...eventImageTypes], limit: '5mb' 
 const adminChatAttachmentTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf', 'text/plain', 'text/csv'])
 const adminChatAttachmentUpload = express.raw({ type: [...adminChatAttachmentTypes], limit: '8mb' })
 const adminChatLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-7', legacyHeaders: false })
+
+router.get('/rewards', requireOwnerOrStaffWalletAuth, async (_request, response, next) => {
+  try {
+    await ensureRewardsTables()
+    const tasks = await query('SELECT id, title, description, points, active, task_type, platform, action_url, verification, proof_label, created_at FROM cobra_tasks ORDER BY created_at DESC')
+    const pool = await query('SELECT total_supply, remaining_supply FROM cobra_point_pool WHERE id = 1')
+    response.json({
+      totalSupply: Number(pool.rows[0]?.total_supply ?? COBRA_POINTS_SUPPLY),
+      remainingSupply: Number(pool.rows[0]?.remaining_supply ?? COBRA_POINTS_SUPPLY),
+      tasks: tasks.rows.map((task) => ({ ...task, points: Number(task.points) })),
+    })
+  } catch (error) { next(error) }
+})
+
+router.post('/rewards/tasks', requireOwnerOrStaffWalletAuth, async (request, response, next) => {
+  try {
+    const title = String(request.body?.title || '').trim()
+    const description = String(request.body?.description || '').trim()
+    const points = Math.floor(Number(request.body?.points))
+    const taskType = ['general', 'social'].includes(String(request.body?.taskType)) ? String(request.body.taskType) : 'general'
+    const platform = String(request.body?.platform || '').trim().slice(0, 40)
+    const actionUrl = String(request.body?.actionUrl || '').trim().slice(0, 500)
+    const verification = 'manual'
+    const proofLabel = String(request.body?.proofLabel || (taskType === 'social' ? 'Proof link or username' : 'Proof')).trim().slice(0, 80) || 'Proof link or username'
+    if (!title || title.length > 120 || !description || description.length > 500 || !Number.isInteger(points) || points < 1 || points > 100000) {
+      return response.status(400).json({ error: 'Enter a task title, description, and reward from 1 to 100,000 points.' })
+    }
+    await ensureRewardsTables()
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+    const result = await query(
+      `INSERT INTO cobra_tasks
+         (id, title, description, points, active, task_type, platform, action_url, verification, proof_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, title, description, points, active, task_type, platform, action_url, verification, proof_label, created_at`,
+      [id, title, description, points, request.body?.active !== false, taskType, platform, actionUrl, verification, proofLabel],
+    )
+    response.status(201).json({ task: { ...result.rows[0], points: Number(result.rows[0].points) } })
+  } catch (error) { next(error) }
+})
+
+router.put('/rewards/tasks/:id', requireOwnerOrStaffWalletAuth, async (request, response, next) => {
+  try {
+    const title = String(request.body?.title || '').trim()
+    const description = String(request.body?.description || '').trim()
+    const points = Math.floor(Number(request.body?.points))
+    const taskType = ['general', 'social'].includes(String(request.body?.taskType)) ? String(request.body.taskType) : 'general'
+    const platform = String(request.body?.platform || '').trim().slice(0, 40)
+    const actionUrl = String(request.body?.actionUrl || '').trim().slice(0, 500)
+    const verification = 'manual'
+    const proofLabel = String(request.body?.proofLabel || (taskType === 'social' ? 'Proof link or username' : 'Proof')).trim().slice(0, 80) || 'Proof link or username'
+    if (!title || title.length > 120 || !description || description.length > 500 || !Number.isInteger(points) || points < 1 || points > 100000) {
+      return response.status(400).json({ error: 'Enter a task title, description, and reward from 1 to 100,000 points.' })
+    }
+    await ensureRewardsTables()
+    const result = await query(
+      `UPDATE cobra_tasks
+       SET title = $2, description = $3, points = $4, active = $5, task_type = $6,
+           platform = $7, action_url = $8, verification = $9, proof_label = $10
+       WHERE id = $1
+       RETURNING id, title, description, points, active, task_type, platform, action_url, verification, proof_label, created_at`,
+      [request.params.id, title, description, points, request.body?.active !== false, taskType, platform, actionUrl, verification, proofLabel],
+    )
+    if (!result.rows[0]) return response.status(404).json({ error: 'Mission not found.' })
+    response.json({ task: { ...result.rows[0], points: Number(result.rows[0].points) } })
+  } catch (error) { next(error) }
+})
+
+router.delete('/rewards/tasks/:id', requireOwnerOrStaffWalletAuth, async (request, response, next) => {
+  try {
+    await ensureRewardsTables()
+    const result = await query('DELETE FROM cobra_tasks WHERE id = $1 RETURNING id', [request.params.id])
+    if (!result.rows[0]) return response.status(404).json({ error: 'Mission not found.' })
+    response.status(204).end()
+  } catch (error) { next(error) }
+})
+
+router.get('/rewards/submissions', requireOwnerOrStaffWalletAuth, async (_request, response, next) => {
+  try {
+    await ensureRewardsTables()
+    const result = await query(`
+      SELECT s.id, s.identity_key, s.task_id, s.proof, s.status, s.review_note, s.created_at,
+             t.title AS task_title, t.action_url AS task_action_url, t.platform, t.points
+      FROM cobra_task_submissions s
+      JOIN cobra_tasks t ON t.id = s.task_id
+      WHERE s.status = 'pending'
+      ORDER BY s.created_at ASC
+    `)
+    response.json({ submissions: result.rows.map((row) => ({ ...row, points: Number(row.points) })) })
+  } catch (error) { next(error) }
+})
+
+router.post('/rewards/submissions/:submissionId/:decision', requireOwnerOrStaffWalletAuth, async (request, response, next) => {
+  const client = await pool.connect()
+  try {
+    await ensureRewardsTables()
+    const decision = request.params.decision
+    if (!['approve', 'reject'].includes(decision)) return response.status(400).json({ error: 'Choose approve or reject.' })
+    await client.query('BEGIN')
+    const submissionResult = await client.query(`
+      SELECT s.id, s.identity_key, s.task_id, s.status, t.title, t.points
+      FROM cobra_task_submissions s
+      JOIN cobra_tasks t ON t.id = s.task_id
+      WHERE s.id = $1 FOR UPDATE`,
+    [request.params.submissionId])
+    const submission = submissionResult.rows[0]
+    if (!submission || submission.status !== 'pending') {
+      await client.query('ROLLBACK')
+      return response.status(404).json({ error: 'This submission is no longer pending.' })
+    }
+    const note = String(request.body?.note || '').trim().slice(0, 300)
+    if (decision === 'reject') {
+      await client.query(
+        `UPDATE cobra_task_submissions
+         SET status = 'rejected', reviewed_at = NOW(), review_note = $2
+         WHERE id = $1`,
+        [submission.id, note],
+      )
+    } else {
+      await client.query(
+        `INSERT INTO cobra_task_completions (identity_key, task_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [submission.identity_key, submission.task_id],
+      )
+      const awarded = await awardCobraPoints(
+        submission.identity_key,
+        Number(submission.points),
+        `Task: ${submission.title}`,
+        `task:${submission.identity_key}:${submission.task_id}`,
+        client,
+      )
+      if (!awarded) throw new Error('The Cobra points reward pool is empty.')
+      await client.query(
+        `UPDATE cobra_task_submissions
+         SET status = 'approved', reviewed_at = NOW(), review_note = $2
+         WHERE id = $1`,
+        [submission.id, note],
+      )
+    }
+    await client.query('COMMIT')
+    response.json({ decision, totalPoints: await getCobraPoints(submission.identity_key) })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    next(error)
+  } finally { client.release() }
+})
 
 function hasValidChatAttachment(contentType, file) {
   if (!Buffer.isBuffer(file) || !file.length) return false
@@ -63,6 +209,13 @@ router.get('/chat/messages', adminChatLimiter, requireOwnerOrStaffWalletAuth, as
   try {
     response.set('Cache-Control', 'private, no-store')
     response.json({ messages: await listAdminChatMessages() })
+  } catch (error) { next(error) }
+})
+
+router.delete('/chat/messages', adminChatLimiter, requireOwnerOrStaffWalletAuth, async (_request, response, next) => {
+  try {
+    const deletedCount = await clearAdminChatConversation()
+    response.json({ cleared: true, deletedCount })
   } catch (error) { next(error) }
 })
 

@@ -1,6 +1,15 @@
 import { pool } from '../db.js'
 
-async function deleteAccountRecords(client, { identityKey, email }) {
+async function deleteAccountRecords(client, account = {}) {
+  const identityKey = typeof account.identity_key === 'string' ? account.identity_key : null
+  const email = typeof account.email === 'string' ? account.email : null
+
+  if (!identityKey) {
+    throw new Error('Scheduled account deletion is missing an identity key.')
+  }
+
+  const isNumericIdentity = /^[1-9]\d*$/.test(identityKey)
+  const isEmailAccount = email !== null || isNumericIdentity
   const tables = await client.query(`
     SELECT to_regclass('public.user_login_events') AS login_events_table,
            to_regclass('public.site_visitors') AS visitors_table,
@@ -10,7 +19,12 @@ async function deleteAccountRecords(client, { identityKey, email }) {
   const walletAddress = identityKey.startsWith('evm:') ? identityKey.slice(4) : identityKey
 
   if (existingTables?.login_events_table) {
-    if (email) {
+    if (isNumericIdentity) {
+      await client.query(
+        'DELETE FROM user_login_events WHERE user_id IN (SELECT id FROM users WHERE id::TEXT = $1)',
+        [identityKey],
+      )
+    } else if (email !== null) {
       await client.query(
         'DELETE FROM user_login_events WHERE user_id IN (SELECT id FROM users WHERE email = $1)',
         [email],
@@ -23,7 +37,7 @@ async function deleteAccountRecords(client, { identityKey, email }) {
     }
   }
 
-  if (!email && existingTables?.visitors_table && existingTables.activity_table) {
+  if (!isEmailAccount && existingTables?.visitors_table && existingTables.activity_table) {
     await client.query(
       `DELETE FROM site_activity_events
        WHERE visitor_id IN (
@@ -35,7 +49,11 @@ async function deleteAccountRecords(client, { identityKey, email }) {
   }
 
   await client.query('DELETE FROM user_profiles WHERE identity_key = $1', [identityKey])
-  if (email) await client.query('DELETE FROM users WHERE email = $1', [email])
+  if (isNumericIdentity) {
+    await client.query('DELETE FROM users WHERE id::TEXT = $1', [identityKey])
+  } else if (email !== null) {
+    await client.query('DELETE FROM users WHERE email = $1', [email])
+  }
 }
 
 export async function processScheduledAccountDeletions() {

@@ -10,6 +10,8 @@ import {
   checkUsernameAvailability,
   fetchAuthProfile,
   fetchReferralStats,
+  fetchCobraTasks,
+  completeCobraTask,
   fetchWalletBalance,
   loginWithEmail,
   recordWalletConnection,
@@ -25,6 +27,7 @@ import {
   verifyWalletLogin,
   verifyTrackedWalletLink,
   type AuthProfile,
+  type CobraTask,
 } from '../lib/api'
 import {
   currencyRateDate,
@@ -136,6 +139,10 @@ const signupUsername = ref('')
 const avatarSeed = ref(0)
 const inviteCode = ref('')
 const invitedCount = ref(0)
+const referralPoints = ref(0)
+const cobraTasks = ref<CobraTask[]>([])
+const tasksLoading = ref(false)
+const taskActionError = ref('')
 const inviteLoading = ref(false)
 const inviteError = ref('')
 const inviteNotice = ref('')
@@ -472,6 +479,7 @@ function clearConnection() {
   avatarSeed.value = 0
   inviteCode.value = ''
   invitedCount.value = 0
+  referralPoints.value = 0
   inviteError.value = ''
   inviteNotice.value = ''
   profileSetup.value = false
@@ -598,6 +606,10 @@ async function restoreWalletSession() {
     void loadReferralStats()
   } catch (error) {
     if (handleBannedAccount(error)) return
+    if (error instanceof Error && /expired|invalid token|sign in again/i.test(error.message)) {
+      clearConnection()
+      return
+    }
     errorMessage.value = readableError(error)
   }
 }
@@ -737,10 +749,39 @@ async function loadReferralStats() {
     const stats = await fetchReferralStats(sessionToken.value)
     inviteCode.value = stats.inviteCode
     invitedCount.value = stats.invitedCount
+    referralPoints.value = stats.referralPoints
+    await loadCobraTasks()
   } catch (error) {
     inviteError.value = readableError(error)
   } finally {
     inviteLoading.value = false
+  }
+}
+
+async function loadCobraTasks() {
+  if (!sessionToken.value) return
+  tasksLoading.value = true
+  taskActionError.value = ''
+  try {
+    const result = await fetchCobraTasks(sessionToken.value)
+    referralPoints.value = result.totalPoints
+    cobraTasks.value = result.tasks
+  } catch (cause) {
+    taskActionError.value = cause instanceof Error ? cause.message : 'Could not load tasks.'
+  } finally {
+    tasksLoading.value = false
+  }
+}
+
+async function finishCobraTask(task: CobraTask) {
+  if (!sessionToken.value || task.completed) return
+  taskActionError.value = ''
+  try {
+    const result = await completeCobraTask(sessionToken.value, task.id)
+    referralPoints.value = result.totalPoints
+    task.completed = true
+  } catch (cause) {
+    taskActionError.value = cause instanceof Error ? cause.message : 'Could not complete this task.'
   }
 }
 
@@ -1310,6 +1351,10 @@ onBeforeUnmount(() => {
     <button class="wallet-button" type="button" :aria-expanded="dialogOpen" @click="openConnectDialog">
       <img v-if="username" :src="avatarDataUrl" alt="" />
       <span v-else>◈</span>{{ deletionScheduledAt ? 'Deletion pending' : username || (address ? shortenedAddress : 'Sign in') }}
+      <span v-if="address && !deletionScheduledAt" class="profile-header-points">
+        <strong>{{ referralPoints.toLocaleString() }}</strong>
+        <small>PTS</small>
+      </span>
     </button>
   </div>
 
@@ -1338,6 +1383,10 @@ onBeforeUnmount(() => {
           <img class="connected-avatar" :src="avatarDataUrl" alt="" />
           <div class="connected-details"><strong>{{ username || 'Your profile' }}</strong><span>{{ address }}</span></div>
           <button v-if="!deletionScheduledAt" class="secondary-action" type="button" @click="editWalletProfile">Edit profile</button>
+          <div class="profile-points" aria-label="Total Cobra points">
+            <strong>{{ referralPoints.toLocaleString() }}</strong>
+            <span>TOTAL POINTS</span>
+          </div>
         </div>
         <section class="currency-preference" aria-labelledby="display-currency-title">
           <div>
@@ -1398,12 +1447,30 @@ onBeforeUnmount(() => {
           <img class="connected-avatar" :src="avatarDataUrl" alt="" />
           <div class="connected-details"><strong>{{ username || walletName }}</strong><span>{{ walletName }} · {{ network }}</span></div>
           <span class="address-short">{{ walletType ? shortenedAddress : '' }}</span>
+          <div class="profile-points" aria-label="Total Cobra points">
+            <strong>{{ referralPoints.toLocaleString() }}</strong>
+            <span>TOTAL POINTS</span>
+          </div>
         </div>
         <section v-if="!deletionScheduledAt" class="invite-preference" aria-labelledby="invite-link-title">
           <div class="invite-preference-heading">
             <div><span class="invite-eyebrow">YOUR PROFILE LINK</span><strong id="invite-link-title">Invite friends</strong><small>Share your unique link and track successful sign-ups.</small></div>
             <span class="invite-count"><strong>{{ invitedCount }}</strong><small>INVITED</small></span>
           </div>
+          <div class="invite-rewards">
+            <div><strong>{{ referralPoints.toLocaleString() }}</strong><span>COBRA POINTS</span></div>
+            <p>Earn 500 points for each successful invite. Redeem points for $COBRA or use them for community event access when rewards launch.</p>
+          </div>
+          <section class="cobra-task-list" aria-labelledby="cobra-task-title">
+            <div class="cobra-task-head"><span>COBRA MISSIONS</span><strong id="cobra-task-title">Earn more points</strong></div>
+            <p v-if="tasksLoading">Loading available tasks…</p>
+            <p v-if="taskActionError" class="cobra-task-error">{{ taskActionError }}</p>
+            <article v-for="task in cobraTasks" :key="task.id">
+              <div><strong>{{ task.title }}</strong><small>{{ task.description }}</small></div>
+              <button type="button" :disabled="task.completed" @click="finishCobraTask(task)">{{ task.completed ? 'COMPLETED' : `+${task.points.toLocaleString()} PTS` }}</button>
+            </article>
+            <p v-if="!tasksLoading && cobraTasks.length === 0">No missions are live yet. Check back soon.</p>
+          </section>
           <div class="invite-link-row">
             <input :value="inviteLoading ? 'Loading your invite link…' : inviteLink || (inviteError ? 'Invite link could not be loaded' : 'Preparing your invite link…')" aria-label="Your personal invite link" readonly />
             <button type="button" :disabled="inviteLoading || !inviteLink" @click="copyInviteLink">{{ inviteLoading ? 'LOADING…' : 'COPY LINK' }}</button>
@@ -1525,8 +1592,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .wallet-controls { display: inline-flex; align-items: center; gap: 7px; }
-.wallet-button { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid var(--line, #333); border-radius: 999px; background: var(--surface, #151515); color: var(--text, #f3f3f3); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.wallet-button { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px 0 14px; border: 1px solid var(--line, #333); border-radius: 999px; background: var(--surface, #151515); color: var(--text, #f3f3f3); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .wallet-button img { width: 27px; height: 27px; border: 1px solid #8ca14d; border-radius: 50%; background: #171d18; object-fit: cover; }
+.profile-header-points { display: inline-flex; align-items: baseline; gap: 3px; min-height: 24px; margin-left: 2px; padding: 5px 7px 0; border-left: 1px solid #46513c; color: #c9e96f; font-size: 11px; line-height: 1; }
+.profile-header-points strong { font-size: 12px; }
+.profile-header-points small { color: #aab7a0; font-size: 7px; font-weight: 850; letter-spacing: .08em; }
 .account-settings-button { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line, #333); border-radius: 50%; background: var(--surface, #151515); color: var(--text, #f3f3f3); cursor: pointer; }
 .account-settings-button:hover,.account-settings-button:focus-visible { border-color: #a8cc58; color: #c7eb6c; }
 .wallet-backdrop { position: fixed; z-index: 2147483647; inset: 0; display: grid; place-items: center; padding: 18px; background: rgb(0 0 0 / 68%); backdrop-filter: blur(7px); overscroll-behavior: contain; }
@@ -1553,12 +1623,28 @@ onBeforeUnmount(() => {
 .invite-count { display: grid; min-width: 55px; justify-items: center; gap: 2px; padding: 6px 9px; border: 1px solid #3b4736; border-radius: 9px; background: #202820; }
 .invite-count strong { color: #c7eb6c; font-size: 17px; }
 .invite-count small { color: #a8b399; font-size: 7px; font-weight: 800; letter-spacing: .08em; }
+.invite-rewards { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid #3b4736; }
+.invite-rewards > div { display: grid; min-width: 72px; justify-items: start; }
+.invite-rewards > div strong { color: #c7eb6c; font-size: 20px; }
+.invite-rewards > div span { color: #a8b399; font-size: 7px; font-weight: 800; letter-spacing: .08em; }
+.invite-rewards p { margin: 0; color: #b9c4b1; font-size: 10px; line-height: 1.45; }
 .invite-link-row { display: flex; min-width: 0; gap: 7px; }
 .invite-link-row input { width: 100%; min-width: 0; height: 40px; padding: 0 10px; border: 1px solid #414c3c; border-radius: 8px; outline: 0; background: #141a16; color: #d7e4c8; font: 10px 'DM Sans', sans-serif; }
 .invite-link-row button,.invite-retry { min-height: 40px; flex: 0 0 auto; padding: 0 11px; border: 1px solid #607844; border-radius: 8px; background: #35472b; color: #e5f2d1; font: inherit; font-size: 9px; font-weight: 850; cursor: pointer; transition: background .16s ease, border-color .16s ease; }
 .invite-link-row button:hover:not(:disabled),.invite-retry:hover:not(:disabled) { border-color: #9cbe5b; background: #405533; }
 .invite-link-row button:disabled,.invite-retry:disabled { cursor: wait; opacity: .6; }
 .invite-retry { justify-self: start; min-height: 30px; }
+.cobra-task-list { display: grid; gap: 8px; padding-top: 8px; }
+.cobra-task-head { display: grid; gap: 3px; }
+.cobra-task-head span { color: #a9cc5b; font-size: 8px; font-weight: 850; letter-spacing: .12em; }
+.cobra-task-head strong { font-size: 14px; }
+.cobra-task-list article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid #35412f; border-radius: 9px; background: rgb(10 15 11 / 55%); }
+.cobra-task-list article div { display: grid; min-width: 0; gap: 3px; }
+.cobra-task-list article strong { font-size: 12px; }
+.cobra-task-list article small { color: #aab7a0; font-size: 10px; line-height: 1.35; }
+.cobra-task-list article button { flex: 0 0 auto; min-height: 32px; border: 1px solid #a9cc5b; border-radius: 999px; background: transparent; color: #c9e96f; font: inherit; font-size: 9px; font-weight: 800; cursor: pointer; }
+.cobra-task-list article button:disabled { border-color: #46573d; color: #899180; cursor: default; }
+.cobra-task-error { color: #f0b5a9; font-size: 10px; }
 .invite-message { margin: 0; font-size: 10px; line-height: 1.5; }
 .invite-error { color: #f0b5a9; }
 .invite-success { color: #b7d98f; }
@@ -1658,6 +1744,9 @@ onBeforeUnmount(() => {
 .connected-details { display: grid; flex: 1; gap: 4px; }
 .connected-details strong { font-size: 14px; }
 .connected-details span,.address-short { color: #999; font-size: 11px; }
+.profile-points { display: grid; flex: 0 0 auto; justify-items: end; gap: 2px; margin-left: 4px; padding-left: 12px; border-left: 1px solid #3a4337; text-align: right; }
+.profile-points strong { color: #c9e96f; font-size: 17px; line-height: 1; }
+.profile-points span { color: #aab7a0; font-size: 8px; font-weight: 850; letter-spacing: .09em; white-space: nowrap; }
 .full-address { overflow-wrap: anywhere; margin-top: 15px; padding: 11px; border-radius: 8px; background: #1b1b1b; color: #999; font-size: 11px; }
 .wallet-balance { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding: 12px; border: 1px solid #303030; border-radius: 10px; }
 .wallet-balance div { display: grid; gap: 4px; }

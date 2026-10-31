@@ -15,9 +15,21 @@ import adminRoutes from './routes/admin.js'
 import analyticsRoutes from './routes/analytics.js'
 import contentRoutes from './routes/content.js'
 import assistantRoutes from './routes/assistant.js'
+import rewardsRoutes from './routes/rewards.js'
+import promotionsRoutes from './routes/promotions.js'
+import communityRoutes from './routes/community.js'
 import { isAllowedFrontendOrigin } from './utils/frontendOrigins.js'
 import { fileURLToPath } from 'node:url'
 import { processScheduledAccountDeletions } from './services/accountDeletion.js'
+
+process.on('uncaughtException', (error) => {
+  console.error('UNCAUGHT_EXCEPTION')
+  console.error(error.stack || error.message)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED_REJECTION')
+  console.error(reason instanceof Error ? reason.stack : String(reason))
+})
 
 const app = express()
 app.disable('x-powered-by')
@@ -121,6 +133,9 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/analytics', analyticsRoutes)
 app.use('/api/content', contentRoutes)
 app.use('/api/assistant', assistantRoutes)
+app.use('/api/rewards', rewardsRoutes)
+app.use('/api/promotions', promotionsRoutes)
+app.use('/api/community', communityRoutes)
 const frontendDistPath = fileURLToPath(new URL('../../frontend/dist/', import.meta.url))
 if (process.env.VERCEL !== '1' && process.env.NODE_ENV === 'production' && existsSync(frontendDistPath)) {
   app.use(express.static(frontendDistPath))
@@ -133,9 +148,9 @@ if (process.env.VERCEL !== '1' && process.env.NODE_ENV === 'production' && exist
 }
 
 app.use((error, _request, response, _next) => {
-  console.error(error.message)
+  console.error(error.stack || error.message)
   if (error.type === 'entity.too.large') {
-    return response.status(413).json({ error: 'The uploaded file exceeds the allowed size limit.' })
+    return response.status(413).json({ error: 'This image is too large. Please upload an image up to 10 MB.' })
   }
   if (!process.env.DATABASE_URL) {
     return response.status(503).json({ error: 'DATABASE_URL is not configured in the backend environment.' })

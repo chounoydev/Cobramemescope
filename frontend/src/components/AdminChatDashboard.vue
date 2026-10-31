@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { fetchAdminChatAttachment, fetchAdminChatMessages, sendAdminChatMessage, uploadAdminChatAttachment, type AdminChatMessage } from '../lib/api'
+import { clearAdminChatConversation, fetchAdminChatAttachment, fetchAdminChatMessages, sendAdminChatMessage, uploadAdminChatAttachment, type AdminChatMessage } from '../lib/api'
 
 const props = defineProps<{
   token: string
@@ -183,6 +183,22 @@ async function downloadAttachment(message: AdminChatMessage) {
   }
 }
 
+async function clearConversation() {
+  if (sending.value || !window.confirm('Delete the entire conversation? This permanently resets chat for every user and admin.')) return
+  sending.value = true
+  errorMessage.value = ''
+  try {
+    await clearAdminChatConversation(props.token)
+    messages.value = []
+    firstLoad = true
+    stickToLatest = true
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Could not reset the conversation.'
+  } finally {
+    sending.value = false
+  }
+}
+
 function handleComposerKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault()
@@ -218,7 +234,10 @@ onBeforeUnmount(() => {
       <header class="admin-chat-room-header">
         <div class="admin-chat-room-mark" aria-hidden="true">C</div>
         <div><strong>Team room</strong><span>Owner and approved staff</span></div>
-        <button type="button" class="admin-chat-refresh" :disabled="loading" aria-label="Refresh team chat" @click="void loadMessages()">↻</button>
+        <div class="admin-chat-room-actions">
+          <button type="button" class="admin-chat-clear" :disabled="loading || sending || !messages.length" @click="void clearConversation()">CLEAR ALL</button>
+          <button type="button" class="admin-chat-refresh" :disabled="loading" aria-label="Refresh team chat" @click="void loadMessages()">↻</button>
+        </div>
       </header>
 
       <div ref="conversation" class="admin-chat-messages" aria-live="polite" @scroll="updateStickToLatest">
@@ -326,6 +345,11 @@ onBeforeUnmount(() => {
 .admin-chat-refresh { display: grid; width: 34px; height: 34px; place-items: center; margin-left: auto; border: 1px solid rgba(146, 164, 143, .2); border-radius: 9px; background: transparent; color: #bec9bc; font-size: 19px; cursor: pointer; }
 .admin-chat-refresh:hover:not(:disabled) { border-color: #ff803d; color: #ff9a5c; }
 .admin-chat-refresh:disabled { opacity: .5; cursor: wait; }
+    .admin-chat-room-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .admin-chat-refresh { margin-left: 0; }
+    .admin-chat-clear { min-height: 34px; padding: 0 12px; border: 1px solid rgba(240, 92, 92, .28); border-radius: 9px; background: rgba(240, 92, 92, .08); color: #ffaaa5; font: 700 10px 'JetBrains Mono', monospace; letter-spacing: .07em; cursor: pointer; }
+    .admin-chat-clear:hover:not(:disabled) { border-color: rgba(240, 92, 92, .55); background: rgba(240, 92, 92, .14); }
+    .admin-chat-clear:disabled { opacity: .45; cursor: not-allowed; }
 .admin-chat-messages { display: flex; min-height: 300px; flex-direction: column; gap: 18px; overflow-y: auto; padding: 22px clamp(14px, 4vw, 36px); scrollbar-color: #435446 transparent; }
 .admin-chat-empty { display: grid; flex: 1; align-content: center; justify-items: center; gap: 10px; min-height: 240px; color: #e6ece3; text-align: center; }
 .admin-chat-empty-mark { width: 50px; height: 50px; border-radius: 15px; font-size: 20px; }

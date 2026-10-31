@@ -7,6 +7,7 @@ import { pool, query } from '../db.js'
 import { createEvmWalletChallenge, createWalletChallenge, verifyEvmWalletChallenge, verifyWalletChallenge } from '../services/walletAuth.js'
 import { isAllowedFrontendOrigin } from '../utils/frontendOrigins.js'
 import { requireAuth, requireAuthAllowPendingDeletion, requireEmailAuth } from '../middleware/auth.js'
+import { awardCobraPoints, ensureRewardsTables, getCobraPoints } from '../services/cobraPoints.js'
 
 const router = Router()
 
@@ -122,6 +123,7 @@ async function findInviterIdentity(inviteCode) {
 
 async function ensureUserProfile(identityKey, email = null, inviterIdentity = null) {
   await ensureProfileTable()
+  const existing = await query('SELECT 1 FROM user_profiles WHERE identity_key = $1', [identityKey])
   const result = await query(
     `INSERT INTO user_profiles (identity_key, email, invite_code, referred_by_identity_key)
      VALUES ($1, $2, $3, CASE WHEN $4 = $1 THEN NULL ELSE $4 END)
@@ -131,6 +133,10 @@ async function ensureUserProfile(identityKey, email = null, inviterIdentity = nu
      RETURNING identity_key, email, username, avatar_seed, tracked_wallet_address, created_at, deletion_scheduled_at, banned_at, ban_reason, invite_code, referred_by_identity_key`,
     [identityKey, email, createInviteCode(), inviterIdentity],
   )
+  if (!existing.rowCount && inviterIdentity) {
+    await ensureRewardsTables()
+    await awardCobraPoints(inviterIdentity, 500, 'Successful invite', `invite:${inviterIdentity}:${identityKey}`)
+  }
   return result.rows[0]
 }
 
@@ -203,6 +209,8 @@ router.post('/register', requireJwtSecret, authLimiter, async (request, response
       [email, passwordHash, username, inviteCodeForUser, inviterIdentity],
     )
     const user = result.rows[0]
+    await ensureRewardsTables()
+    if (inviterIdentity) await awardCobraPoints(inviterIdentity, 500, 'Successful invite', `invite:${inviterIdentity}:${user.id}`)
     await recordLoginEvent({ userId: user.id, authType: 'email' })
     response.status(201).json({
       token: createToken(user),
@@ -354,7 +362,15 @@ router.get('/profile/invites', requireAuth, async (request, response, next) => {
       [request.user.id],
     )
     response.set('Cache-Control', 'private, no-store')
-    response.json({ inviteCode: profile.invite_code, invitedCount: result.rows[0].invited_count })
+    const invitedCount = result.rows[0].invited_count
+    const referralPoints = invitedCount * 500
+    const totalPoints = await getCobraPoints(request.user.id)
+    response.json({
+      inviteCode: profile.invite_code,
+      invitedCount,
+      referralPoints: Math.max(referralPoints, totalPoints),
+      totalPoints,
+    })
   } catch (error) {
     next(error)
   }

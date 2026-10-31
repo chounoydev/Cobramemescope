@@ -39,8 +39,11 @@ export type TrendingMemecoin = {
   buys24h: number
   sells24h: number
   momentumScore: number
+  qualityScore?: number
+  qualityTier?: 'STRONG' | 'WATCH' | 'EARLY'
   momentumLabel: string
   promoted: boolean
+  promotedVerified?: boolean
   boostAmount: number
   marketStatus?: 'LIVE' | 'BEARISH' | 'THIN LIQUIDITY' | 'UNAVAILABLE' | 'STALE'
   marketUpdatedAt?: string
@@ -124,6 +127,7 @@ export type DonorDashboard = {
     tokensTrackedToday: number
   } | null
   analyticsError?: string | null
+  rpcError?: string | null
   updatedAt: string
 }
 
@@ -170,16 +174,161 @@ export type AdminUser = {
 
 export type AdminChatMessage = {
   id: string
+  senderIdentityKey?: string
   senderWalletAddress: string
   senderName: string
   message: string
   attachmentName: string | null
   attachmentContentType: string | null
   createdAt: string
+  editedAt?: string | null
+  deletedAt?: string | null
+  senderRole?: 'admin' | 'member'
+}
+
+export async function fetchCommunityChatMessages(): Promise<AdminChatMessage[]> {
+  const response = await fetch(`${apiBaseUrl}/api/community/chat/messages`, { cache: 'no-store' })
+  const payload = await readApiResponse<{ messages?: AdminChatMessage[]; error?: string }>(response, 'Could not load the community chat.')
+  if (!response.ok || !Array.isArray(payload.messages)) throw new Error(payload.error || 'Could not load the community chat.')
+  return payload.messages
+}
+
+export async function sendCommunityChatMessage(token: string, message: string): Promise<AdminChatMessage> {
+  const response = await fetch(`${apiBaseUrl}/api/community/chat/messages`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  })
+  const payload = await readApiResponse<{ message?: AdminChatMessage; error?: string }>(response, 'Could not send your message.')
+  if (!response.ok || !payload.message?.id) throw new Error(payload.error || 'Could not send your message.')
+  return payload.message
+}
+
+export async function uploadCommunityChatImage(token: string, file: File, message: string): Promise<AdminChatMessage> {
+  const url = new URL(`${apiBaseUrl}/api/community/chat/attachments`, window.location.origin)
+  if (message) url.searchParams.set('message', message)
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) },
+    body: file,
+  })
+  const payload = await readApiResponse<{ message?: AdminChatMessage; error?: string }>(response, 'Could not upload the image.')
+  if (!response.ok || !payload.message?.id) throw new Error(payload.error || 'Could not upload the image.')
+  return payload.message
+}
+
+export function communityChatAttachmentUrl(messageId: string): string {
+  return `${apiBaseUrl}/api/community/chat/messages/${encodeURIComponent(messageId)}/attachment`
+}
+
+export async function editCommunityChatMessage(token: string, messageId: string, message: string): Promise<AdminChatMessage> {
+  const response = await fetch(`${apiBaseUrl}/api/community/chat/messages/${encodeURIComponent(messageId)}`, {
+    method: 'PATCH',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  })
+  const payload = await readApiResponse<{ message?: AdminChatMessage; error?: string }>(response, 'Could not edit your message.')
+  if (!response.ok || !payload.message) throw new Error(payload.error || 'Could not edit your message.')
+  return payload.message
+}
+
+export async function deleteCommunityChatMessage(token: string, messageId: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/community/chat/messages/${encodeURIComponent(messageId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer ' + token },
+  })
+  if (!response.ok) {
+    const payload = await readApiResponse<{ error?: string }>(response, 'Could not delete your message.')
+    throw new Error(payload.error || 'Could not delete your message.')
+  }
 }
 
 export type AdminInviteLeader = Pick<AdminUser, 'identityKey' | 'email' | 'username' | 'authType' | 'createdAt' | 'invitedCount'>
 
+export type CobraTask = {
+  id: string
+  title: string
+  description: string
+  points: number
+  active?: boolean
+  completed?: boolean
+  taskType?: 'general' | 'social'
+  platform?: string
+  actionUrl?: string
+  verification?: 'automatic' | 'manual'
+  proofLabel?: string
+  submissionStatus?: 'pending' | 'approved' | 'rejected'
+  submissionReviewNote?: string
+  createdAt?: string
+}
+
+export type DailyLoginReward = {
+  totalPoints: number
+  streak: number
+  longestStreak: number
+  claimedToday: boolean
+  nextPoints: number
+  awarded?: number
+  alreadyClaimed?: boolean
+}
+
+export type PromotionOptions = {
+  receiver: string
+  baseDays: number
+  basePriceSol: number
+  periodDays: number
+  maxDays: number
+  currencies: string[]
+}
+
+export async function fetchPromotionOptions(): Promise<PromotionOptions> {
+  const response = await fetch(`${apiBaseUrl}/api/promotions/options`, { cache: 'no-store' })
+  const payload = await readApiResponse<PromotionOptions & { error?: string }>(response, 'Could not load promotion pricing.')
+  if (!response.ok) throw new Error(payload.error || 'Could not load promotion pricing.')
+  return payload
+}
+
+export async function createTokenPromotion(token: string, promotion: {
+  name: string
+  symbol: string
+  mintAddress: string
+  imageUrl?: string
+  websiteUrl?: string
+  socialUrl?: string
+  description: string
+  days: number
+  currency: string
+}): Promise<any> {
+  const response = await fetch(`${apiBaseUrl}/api/promotions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(promotion),
+  })
+  const payload = await readApiResponse<{ promotion?: any; error?: string }>(response, 'Could not create this promotion.')
+  if (!response.ok || !payload.promotion) throw new Error(payload.error || 'Could not create this promotion.')
+  return payload.promotion
+}
+
+export async function uploadTokenPromotionImage(token: string, file: File): Promise<string> {
+  const response = await fetch(`${apiBaseUrl}/api/promotions/images`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: file,
+  })
+  const payload = await readApiResponse<{ url?: string; error?: string }>(response, 'Could not upload the token photo.')
+  if (!response.ok || !payload.url) throw new Error(payload.error || 'Could not upload the token photo.')
+  return payload.url.startsWith('http') ? payload.url : `${apiBaseUrl}${payload.url}`
+}
+
+export async function verifyTokenPromotionPayment(token: string, promotionId: string, signature: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/promotions/${encodeURIComponent(promotionId)}/verify-payment`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature }),
+  })
+  const payload = await readApiResponse<{ error?: string }>(response, 'Could not verify this payment.')
+  if (!response.ok) throw new Error(payload.error || 'Could not verify this payment.')
+}
 export type SeasonalTheme = 'none' | 'christmas' | 'halloween' | 'new-year'
 const seasonalThemeValues = new Set<string>(['none', 'christmas', 'halloween', 'new-year'])
 
@@ -245,7 +394,7 @@ export async function askMemeScopeAssistant(
   try {
     response = await fetch(`${apiBaseUrl}/api/assistant`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, history, scanContext }),
     })
   } catch (error) {
@@ -274,7 +423,7 @@ async function readApiResponse<T extends { error?: string }>(response: Response,
 }
 
 export async function fetchTrendingMemecoins(): Promise<{ coins: TrendingMemecoin[]; updatedAt: string; windowDays: number; refreshSeconds: number; excludedChange24h: number; stale: boolean }> {
-  const response = await fetch(`${apiBaseUrl}/api/market/trending?limit=50`)
+  const response = await fetch(`${apiBaseUrl}/api/market/trending?limit=100`)
   const payload = await readApiResponse<{ coins?: TrendingMemecoin[]; updatedAt?: string; windowDays?: number; refreshSeconds?: number; excludedChange24h?: number; stale?: boolean; error?: string }>(response, 'Could not load new market launches.')
   if (!response.ok || !Array.isArray(payload.coins)) throw new Error(payload.error || 'Could not load new market launches.')
   return {
@@ -317,16 +466,30 @@ export async function fetchDonorDashboard(token: string): Promise<DonorDashboard
 }
 
 async function adminRequest<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${apiBaseUrl}${path}`, {
-      ...init,
-      headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
-    })
-  } catch (error) {
-    if (error instanceof TypeError) throw new Error('Could not reach the Cobra MemeScope API. Check that the backend is running and the API URL is correct.')
-    throw error
+  let response: Response | undefined
+  const method = String(init.method || 'GET').toUpperCase()
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(`${apiBaseUrl}${path}`, {
+        ...init,
+
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      })
+      if ([502, 503, 504].includes(response.status) && method === 'GET' && attempt < 2) {
+        await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)))
+        continue
+      }
+      break
+    } catch (error) {
+      if (error instanceof TypeError && attempt < 2) {
+        await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)))
+        continue
+      }
+      if (error instanceof TypeError) throw new Error('Could not reach the Cobra MemeScope API. Check that the backend is running and the API URL is correct.')
+      throw error
+    }
   }
+  if (!response) throw new Error('The private admin request could not be started.')
   const payload = await readApiResponse<T & { error?: string }>(response, 'The private admin request failed.')
   if (!response.ok) throw new Error(payload.error || 'The private admin request failed.')
   return payload as T
@@ -340,6 +503,11 @@ export async function fetchAdminChatMessages(token: string): Promise<AdminChatMe
   const payload = await adminRequest<{ messages?: AdminChatMessage[] }>(token, '/api/admin/chat/messages')
   if (!Array.isArray(payload.messages)) throw new Error('The admin chat messages were not returned.')
   return payload.messages
+}
+
+export async function clearAdminChatConversation(token: string): Promise<number> {
+  const payload = await adminRequest<{ deletedCount?: number }>(token, '/api/admin/chat/messages', { method: 'DELETE' })
+  return Number(payload.deletedCount || 0)
 }
 
 export async function sendAdminChatMessage(token: string, message: string): Promise<AdminChatMessage> {
@@ -357,7 +525,7 @@ export async function uploadAdminChatAttachment(token: string, file: File, conte
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `******`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': contentType,
       'X-File-Name': encodeURIComponent(file.name),
     },
@@ -370,7 +538,7 @@ export async function uploadAdminChatAttachment(token: string, file: File, conte
 
 export async function fetchAdminChatAttachment(token: string, messageId: string): Promise<Blob> {
   const response = await fetch(`${apiBaseUrl}/api/admin/chat/messages/${encodeURIComponent(messageId)}/attachment`, {
-    headers: { Authorization: `******` },
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) {
     const payload = await readApiResponse<{ error?: string }>(response, 'Could not load this chat attachment.')
@@ -387,12 +555,21 @@ export async function fetchLandingEvents(): Promise<LandingEvent[]> {
 }
 
 export async function fetchSiteTheme(): Promise<SeasonalTheme> {
-  const response = await fetch(`${apiBaseUrl}/api/content/theme`, { cache: 'no-store' })
-  const payload = await readApiResponse<{ theme?: SeasonalTheme; error?: string }>(response, 'Could not load the site appearance.')
-  if (!response.ok || !isSeasonalTheme(payload.theme)) {
-    throw new Error(payload.error || 'The site appearance was not returned.')
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/content/theme`, { cache: 'no-store' })
+      const payload = await readApiResponse<{ theme?: SeasonalTheme; error?: string }>(response, 'Could not load the site appearance.')
+      if (!response.ok || !isSeasonalTheme(payload.theme)) {
+        throw new Error(payload.error || 'The site appearance was not returned.')
+      }
+      return payload.theme
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Could not load the site appearance.')
+      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)))
+    }
   }
-  return payload.theme
+  throw lastError || new Error('Could not load the site appearance.')
 }
 
 export async function saveAdminSiteTheme(token: string, theme: SeasonalTheme): Promise<SeasonalTheme> {
@@ -578,21 +755,129 @@ export async function fetchAuthProfile(token: string): Promise<AuthProfile> {
   return payload.profile
 }
 
-export async function fetchReferralStats(token: string): Promise<{ inviteCode: string; invitedCount: number }> {
+export async function fetchReferralStats(token: string): Promise<{ inviteCode: string; invitedCount: number; referralPoints: number }> {
   const response = await fetch(`${apiBaseUrl}/api/auth/profile/invites`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   })
-  const payload = await readApiResponse<{ inviteCode?: string; invitedCount?: number; error?: string }>(response, 'Could not load your invite link.')
+  const payload = await readApiResponse<{ inviteCode?: string; invitedCount?: number; referralPoints?: number; error?: string }>(response, 'Could not load your invite link.')
   if (!response.ok || !payload.inviteCode || typeof payload.invitedCount !== 'number') {
     throw new Error(payload.error || 'Could not load your invite link.')
   }
-  return { inviteCode: payload.inviteCode, invitedCount: payload.invitedCount }
+  return {
+    inviteCode: payload.inviteCode,
+    invitedCount: payload.invitedCount,
+    referralPoints: typeof payload.referralPoints === 'number' ? payload.referralPoints : payload.invitedCount * 500,
+  }
+}
+
+export async function fetchCobraTasks(token: string): Promise<{ totalPoints: number; tasks: CobraTask[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/rewards/tasks`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+  const payload = await readApiResponse<{ totalPoints?: number; tasks?: CobraTask[]; error?: string }>(response, 'Could not load Cobra tasks.')
+  if (!response.ok) throw new Error(payload.error || 'Could not load Cobra tasks.')
+  return { totalPoints: Number(payload.totalPoints || 0), tasks: payload.tasks || [] }
+}
+
+export async function completeCobraTask(token: string, taskId: string, proof = ''): Promise<{ totalPoints: number; submitted?: boolean; pending?: boolean }> {
+  const response = await fetch(`${apiBaseUrl}/api/rewards/tasks/${encodeURIComponent(taskId)}/complete?proof=${encodeURIComponent(proof)}`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token },
+  })
+  const payload = await readApiResponse<{ totalPoints?: number; submitted?: boolean; pending?: boolean; error?: string }>(response, 'Could not complete this task.')
+  if (!response.ok) throw new Error(payload.error || 'Could not complete this task.')
+  return { totalPoints: Number(payload.totalPoints || 0), submitted: payload.submitted, pending: payload.pending }
+}
+
+export async function fetchDailyLoginReward(token: string): Promise<DailyLoginReward> {
+  const response = await fetch(`${apiBaseUrl}/api/rewards/daily-login`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+  const payload = await readApiResponse<DailyLoginReward & { error?: string }>(response, 'Could not load daily login rewards.')
+  if (!response.ok) throw new Error(payload.error || 'Could not load daily login rewards.')
+  return payload
+}
+
+export async function claimDailyLoginReward(token: string): Promise<DailyLoginReward> {
+  const response = await fetch(`${apiBaseUrl}/api/rewards/daily-login/claim`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const payload = await readApiResponse<DailyLoginReward & { error?: string }>(response, 'Could not claim todayÃ¢â‚¬â„¢s login reward.')
+  if (!response.ok) throw new Error(payload.error || 'Could not claim todayÃ¢â‚¬â„¢s login reward.')
+  return payload
+}
+
+export async function fetchAdminRewards(token: string): Promise<{ totalSupply: number; remainingSupply: number; tasks: CobraTask[] }> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/rewards`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+  const payload = await readApiResponse<{ totalSupply?: number; remainingSupply?: number; tasks?: CobraTask[]; error?: string }>(response, 'Could not load Cobra rewards.')
+  if (!response.ok) throw new Error(payload.error || 'Could not load Cobra rewards.')
+  return { totalSupply: Number(payload.totalSupply || 17_000_000), remainingSupply: Number(payload.remainingSupply || 17_000_000), tasks: payload.tasks || [] }
+}
+
+export async function createAdminRewardTask(token: string, task: { title: string; description: string; points: number; active?: boolean; taskType?: 'general' | 'social'; platform?: string; actionUrl?: string; verification?: 'automatic' | 'manual'; proofLabel?: string }): Promise<CobraTask> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/rewards/tasks`, {
+    method: 'POST',
+
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(task),
+  })
+  const payload = await readApiResponse<{ task?: CobraTask; error?: string }>(response, 'Could not create this Cobra task.')
+  if (!response.ok || !payload.task) throw new Error(payload.error || 'Could not create this Cobra task.')
+  return payload.task
+}
+
+export async function updateAdminRewardTask(token: string, taskId: string, task: { title: string; description: string; points: number; active?: boolean; taskType?: 'general' | 'social'; platform?: string; actionUrl?: string; verification?: 'automatic' | 'manual'; proofLabel?: string }): Promise<CobraTask> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/rewards/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(task),
+  })
+  const payload = await readApiResponse<{ task?: CobraTask; error?: string }>(response, 'Could not update this Cobra task.')
+  if (!response.ok || !payload.task) throw new Error(payload.error || 'Could not update this Cobra task.')
+  return payload.task
+}
+
+export async function deleteAdminRewardTask(token: string, taskId: string): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/rewards/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer ' + token },
+  })
+  if (!response.ok) {
+    const payload = await readApiResponse<{ error?: string }>(response, 'Could not delete this Cobra task.')
+    throw new Error(payload.error || 'Could not delete this Cobra task.')
+  }
+}
+
+export async function fetchAdminRewardSubmissions(token: string): Promise<{ id: string; identityKey: string; taskId: string; taskTitle: string; taskActionUrl: string; platform: string; proof: string; points: number; createdAt: string }[]> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/rewards/submissions`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+  const payload = await readApiResponse<{ submissions?: any[]; error?: string }>(response, 'Could not load task submissions.')
+  if (!response.ok) throw new Error(payload.error || 'Could not load task submissions.')
+  return (payload.submissions || []).map((row) => ({
+    id: String(row.id),
+    identityKey: String(row.identity_key),
+    taskId: String(row.task_id),
+    taskTitle: String(row.task_title),
+    taskActionUrl: String(row.task_action_url || ''),
+    platform: String(row.platform || ''),
+    proof: String(row.proof),
+    points: Number(row.points),
+    createdAt: String(row.created_at),
+  }))
+}
+
+export async function decideAdminRewardSubmission(token: string, submissionId: string, decision: 'approve' | 'reject', note = ''): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/admin/rewards/submissions/${encodeURIComponent(submissionId)}/${decision}`, {
+    method: 'POST',
+
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
+  })
+  const payload = await readApiResponse<{ error?: string }>(response, 'Could not review this submission.')
+  if (!response.ok) throw new Error(payload.error || 'Could not review this submission.')
 }
 
 export async function saveAuthProfile(token: string, username: string): Promise<AuthProfile> {
   const response = await fetch(`${apiBaseUrl}/api/auth/profile`, {
     method: 'PUT',
+
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ username }),
   })
@@ -609,6 +894,7 @@ export async function requestTrackedWalletChallenge(
 ): Promise<{ nonce: string; message: string }> {
   const response = await fetch(`${apiBaseUrl}/api/auth/profile/tracked-wallet/challenge`, {
     method: 'POST',
+
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ walletAddress, walletType, chainId }),
   })
@@ -626,6 +912,7 @@ export async function verifyTrackedWalletLink(
 ): Promise<string> {
   const response = await fetch(`${apiBaseUrl}/api/auth/profile/tracked-wallet/verify`, {
     method: 'POST',
+
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ walletAddress, walletType, nonce, signature }),
   })
@@ -704,7 +991,7 @@ export async function fetchWalletBalance(token: string): Promise<{ walletAddress
 
 export async function fetchWalletHoldings(token: string): Promise<{ holdings: WalletTokenHolding[]; unavailableChains: string[]; updatedAt: string }> {
   const response = await fetch(`${apiBaseUrl}/api/wallet/holdings`, {
-    headers: { Authorization: 'Bearer ' + token },
+    headers: { Authorization: `Bearer ${token}` },
   })
   const payload = await readApiResponse<{ holdings?: WalletTokenHolding[]; unavailableChains?: string[]; updatedAt?: string; error?: string }>(response, 'Could not load wallet holdings.')
   if (!response.ok) throw new Error(payload.error || 'Could not load wallet holdings.')

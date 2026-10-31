@@ -10,6 +10,12 @@ import {
   fetchAdminStaff,
   fetchAdminUsers,
   fetchSiteTheme,
+  fetchAdminRewards,
+  createAdminRewardTask,
+  updateAdminRewardTask,
+  deleteAdminRewardTask,
+  fetchAdminRewardSubmissions,
+  decideAdminRewardSubmission,
   saveAdminEvent,
   saveAdminSiteTheme,
   unbanAdminUser,
@@ -18,12 +24,13 @@ import {
   type AdminInviteLeader,
   type LandingEvent,
   type SeasonalTheme,
+  type CobraTask,
   type StaffWallet,
 } from '../lib/api'
 
 const props = defineProps<{ token: string; role: 'owner' | 'staff' }>()
 const emit = defineEmits<{ 'theme-updated': [theme: SeasonalTheme] }>()
-type AdminContentSection = 'events' | 'appearance' | 'staff' | 'invites' | 'users'
+type AdminContentSection = 'events' | 'appearance' | 'staff' | 'invites' | 'users' | 'rewards'
 
 const events = ref<LandingEvent[]>([])
 const staff = ref<StaffWallet[]>([])
@@ -62,6 +69,15 @@ const userSaving = ref(false)
 let userLoadSequence = 0
 let userRefreshTimer: number | undefined
 const eventForm = reactive({ badge: '', title: '', description: '', eventDate: '', cta: '', imageUrl: '' })
+const rewardTasks = ref<CobraTask[]>([])
+const rewardSupply = ref(17_000_000)
+const rewardRemaining = ref(17_000_000)
+const rewardTaskForm = reactive({
+  title: '', description: '', points: 100, active: true, taskType: 'general' as 'general' | 'social',
+  platform: '', actionUrl: '', verification: 'manual' as 'automatic' | 'manual', proofLabel: 'Proof link or username',
+})
+const rewardSubmissions = ref<any[]>([])
+const editingRewardTaskId = ref<string | null>(null)
 const themeOptions: { id: SeasonalTheme; label: string; description: string; icon: string }[] = [
   { id: 'none', label: 'Default', description: 'Keep the standard Cobra MemeScope background.', icon: '◐' },
   { id: 'christmas', label: 'Christmas · Santa Claus', description: 'A snowy Christmas village under the northern lights.', icon: '🎅' },
@@ -140,11 +156,103 @@ async function loadDashboard() {
         error.value = cause instanceof Error ? cause.message : 'Could not load the staff list.'
       }
     }
+    try {
+      const rewards = await fetchAdminRewards(props.token)
+      rewardTasks.value = rewards.tasks
+      rewardSupply.value = rewards.totalSupply
+      rewardRemaining.value = rewards.remainingSupply
+      rewardSubmissions.value = await fetchAdminRewardSubmissions(props.token)
+    } catch (cause) {
+      error.value = cause instanceof Error ? cause.message : 'Could not load Cobra rewards.'
+    }
   } catch (cause) {
     events.value = previewEvents.map((event) => ({ ...event }))
     error.value = cause instanceof Error ? cause.message : 'Could not load the private editor.'
   } finally {
     loading.value = false
+  }
+}
+
+async function createRewardTask() {
+  if (saving.value || !rewardTaskForm.title.trim() || !rewardTaskForm.description.trim() || rewardTaskForm.points < 1) return
+  saving.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const wasEditing = Boolean(editingRewardTaskId.value)
+    const task = editingRewardTaskId.value
+      ? await updateAdminRewardTask(props.token, editingRewardTaskId.value, { ...rewardTaskForm })
+      : await createAdminRewardTask(props.token, { ...rewardTaskForm })
+    rewardTasks.value = editingRewardTaskId.value
+      ? rewardTasks.value.map((entry) => entry.id === task.id ? task : entry)
+      : [task, ...rewardTasks.value]
+    rewardTaskForm.title = ''
+    rewardTaskForm.description = ''
+    rewardTaskForm.points = 100
+    rewardTaskForm.taskType = 'general'
+    rewardTaskForm.platform = ''
+    rewardTaskForm.actionUrl = ''
+    rewardTaskForm.verification = 'manual'
+    editingRewardTaskId.value = null
+    notice.value = wasEditing ? 'Cobra task updated.' : 'Cobra task published.'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Could not create the Cobra task.'
+  } finally {
+    saving.value = false
+  }
+}
+
+function editRewardTask(task: CobraTask) {
+  editingRewardTaskId.value = task.id
+  Object.assign(rewardTaskForm, {
+    title: task.title,
+    description: task.description,
+    points: task.points,
+    active: task.active !== false,
+    taskType: task.taskType || 'general',
+    platform: task.platform || '',
+    actionUrl: task.actionUrl || '',
+    verification: 'manual',
+    proofLabel: task.proofLabel || 'Proof link or username',
+  })
+  document.querySelector('.admin-reward-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function cancelRewardTaskEdit() {
+  editingRewardTaskId.value = null
+  Object.assign(rewardTaskForm, {
+    title: '', description: '', points: 100, active: true, taskType: 'general',
+    platform: '', actionUrl: '', verification: 'manual', proofLabel: 'Proof link or username',
+  })
+}
+
+async function removeRewardTask(task: CobraTask) {
+  if (!window.confirm(`Delete the mission "${task.title}"?`)) return
+  saving.value = true
+  error.value = ''
+  try {
+    await deleteAdminRewardTask(props.token, task.id)
+    rewardTasks.value = rewardTasks.value.filter((entry) => entry.id !== task.id)
+    if (editingRewardTaskId.value === task.id) cancelRewardTaskEdit()
+    notice.value = 'Cobra task deleted.'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Could not delete the Cobra task.'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function reviewRewardSubmission(submissionId: string, decision: 'approve' | 'reject') {
+  saving.value = true
+  error.value = ''
+  try {
+    await decideAdminRewardSubmission(props.token, submissionId, decision)
+    rewardSubmissions.value = await fetchAdminRewardSubmissions(props.token)
+    notice.value = decision === 'approve' ? 'Submission approved and points awarded.' : 'Submission rejected.'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Could not review the submission.'
+  } finally {
+    saving.value = false
   }
 }
 
@@ -382,7 +490,47 @@ onUnmounted(() => {
         <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'staff' }" :aria-current="activeSection === 'staff' ? 'page' : undefined" @click="activeSection = 'staff'"><span>03</span> Staff access</button>
         <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'invites' }" :aria-current="activeSection === 'invites' ? 'page' : undefined" @click="openInviteSection"><span>04</span> Invite leaderboard</button>
         <button v-if="role === 'owner'" type="button" :class="{ active: activeSection === 'users' }" :aria-current="activeSection === 'users' ? 'page' : undefined" @click="openUserSection('users')"><span>05</span> User directory</button>
+        <button type="button" :class="{ active: activeSection === 'rewards' }" :aria-current="activeSection === 'rewards' ? 'page' : undefined" @click="activeSection = 'rewards'"><span>06</span> Cobra points</button>
       </nav>
+
+      <section v-if="activeSection === 'rewards'" class="admin-theme-panel" aria-labelledby="admin-rewards-title">
+        <div class="admin-section-head">
+          <div><span>17M POINTS ECOSYSTEM</span><h2 id="admin-rewards-title">Cobra rewards tasks</h2></div>
+        </div>
+        <div class="admin-reward-supply">
+          <div><span>TOTAL SUPPLY</span><strong>{{ rewardSupply.toLocaleString() }}</strong></div>
+          <div><span>AVAILABLE TO AWARD</span><strong>{{ rewardRemaining.toLocaleString() }}</strong></div>
+          <div><span>POINTS DISTRIBUTED</span><strong>{{ (rewardSupply - rewardRemaining).toLocaleString() }}</strong></div>
+        </div>
+        <form class="admin-event-form admin-reward-form" @submit.prevent="createRewardTask">
+          <div class="admin-section-head"><div><span>{{ editingRewardTaskId ? 'UPDATE MISSION' : 'CREATE MISSION' }}</span><h2>{{ editingRewardTaskId ? 'Edit task' : 'New task' }}</h2></div><button v-if="editingRewardTaskId" type="button" class="admin-cancel" @click="cancelRewardTaskEdit">CANCEL</button></div>
+          <label>Task title<input v-model="rewardTaskForm.title" maxlength="120" required placeholder="Follow Cobra MemeScope" /></label>
+          <label>Description<textarea v-model="rewardTaskForm.description" maxlength="500" rows="4" required placeholder="Explain what users need to do" /></label>
+          <label>Points reward<input v-model.number="rewardTaskForm.points" type="number" min="1" max="100000" required /></label>
+          <label>Task type<select v-model="rewardTaskForm.taskType"><option value="general">General task</option><option value="social">Social media task</option></select></label>
+          <template v-if="rewardTaskForm.taskType === 'social'">
+            <label>Social platform<select v-model="rewardTaskForm.platform"><option value="">Select platform</option><option>X / Twitter</option><option>Discord</option><option>Telegram</option><option>TikTok</option><option>YouTube</option><option>Instagram</option></select></label>
+            <label>Action link<input v-model="rewardTaskForm.actionUrl" type="url" maxlength="500" placeholder="https://x.com/cobramemescope" /></label>
+            <label>Verification<select v-model="rewardTaskForm.verification" disabled><option value="manual">Admin proof review required</option></select></label>
+            <label>Proof label<input v-model="rewardTaskForm.proofLabel" maxlength="80" placeholder="Proof link or username" /></label>
+          </template>
+          <button type="submit" class="admin-primary admin-save" :disabled="saving || !databaseReady">{{ saving ? 'SAVING…' : editingRewardTaskId ? 'SAVE CHANGES' : 'PUBLISH TASK' }}</button>
+        </form>
+        <div class="admin-reward-submissions">
+          <div class="admin-section-head"><div><span>VERIFICATION QUEUE</span><h2>Pending social proofs</h2></div></div>
+          <article v-for="submission in rewardSubmissions" :key="submission.id" class="admin-reward-submission">
+            <div><strong>{{ submission.taskTitle }}</strong><small>{{ submission.identityKey }}</small><a :href="submission.taskActionUrl || undefined" target="_blank" rel="noopener">{{ submission.taskActionUrl || 'Open task post' }}</a><a :href="submission.proof.match(/^https?:\/\//i) ? submission.proof : undefined" target="_blank" rel="noopener">{{ submission.proof }}</a></div>
+            <span>+{{ submission.points.toLocaleString() }} PTS</span>
+            <button type="button" :disabled="saving" @click="reviewRewardSubmission(submission.id, 'approve')">APPROVE</button>
+            <button type="button" class="admin-delete" :disabled="saving" @click="reviewRewardSubmission(submission.id, 'reject')">REJECT</button>
+          </article>
+          <p v-if="rewardSubmissions.length === 0">No social proof submissions waiting.</p>
+        </div>
+        <div class="admin-reward-task-list">
+          <article v-for="task in rewardTasks" :key="task.id"><div><strong>{{ task.title }}</strong><small>{{ task.description }}</small></div><div class="admin-reward-task-side"><span>+{{ task.points.toLocaleString() }} PTS</span><button type="button" @click="editRewardTask(task)">EDIT</button><button type="button" class="admin-delete" @click="removeRewardTask(task)">DELETE</button></div></article>
+          <p v-if="rewardTasks.length === 0">No reward tasks created yet.</p>
+        </div>
+      </section>
 
       <section v-if="activeSection === 'events'" class="admin-content-layout" aria-label="Landing page content">
         <section class="admin-event-list" aria-labelledby="event-list-title">
@@ -541,6 +689,19 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.admin-reward-supply { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px; }
+.admin-reward-supply div { display: grid; gap: 5px; padding: 14px; border: 1px solid #d7ddce; background: #f6f8f3; }
+.admin-reward-supply span { color: #74806c; font-size: 8px; font-weight: 800; letter-spacing: .08em; }
+.admin-reward-supply strong { color: #35442f; font-size: 18px; }
+.admin-reward-form { margin-top: 14px; }
+.admin-reward-task-list { display: grid; gap: 8px; margin: 14px; }
+.admin-reward-task-list article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #d8ddd2; background: #f8faf5; }
+.admin-reward-task-list article div { display: grid; gap: 4px; }
+.admin-reward-task-list small { color: #747d70; }
+.admin-reward-task-list span { flex: 0 0 auto; color: #617d2f; font-size: 10px; font-weight: 800; }
+.admin-reward-task-side { display: flex !important; align-items: center; flex-direction: row !important; gap: 7px !important; }
+.admin-reward-task-side button { min-height: 30px; padding: 0 9px; border: 1px solid #ccd4c4; background: transparent; color: #53634b; font-size: 9px; font-weight: 800; cursor: pointer; }
+.admin-reward-task-side button.admin-delete { border-color: #dfb1a8; color: #a54d3d; }
 .admin-content-nav { display: flex; flex-wrap: wrap; gap: 7px; margin: 20px 0 16px; padding: 5px; border: 1px solid #dce0d7; background: #e9ede5; }
 .admin-content-nav button { display: inline-flex; min-height: 38px; align-items: center; gap: 9px; padding: 0 13px; border: 1px solid transparent; background: transparent; color: #64705e; font: 600 10px 'DM Sans', sans-serif; cursor: pointer; }
 .admin-content-nav button > span { color: #87917f; font: 8px 'DM Mono', monospace; }

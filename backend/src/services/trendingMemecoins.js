@@ -39,12 +39,12 @@ const geckoTerminalNetworks = {
   moonbeam: 'moonbeam',
   sonic: 'sonic',
 }
-const maxTrendingCoins = 50
+const maxTrendingCoins = 100
 const newPoolMaxAgeMs = 30 * 24 * 60 * 60 * 1000
 const minimumLiquidityUsd = 5_000
 const minimumVolume24hUsd = 1_000
 const dumpThreshold24h = -20
-const cacheTtlMs = 60_000
+const cacheTtlMs = 30_000
 const staleCacheTtlMs = 10 * 60_000
 const geckoDiscoveryCacheTtlMs = 5 * 60_000
 const chartCacheTtlMs = 20_000
@@ -90,6 +90,30 @@ function momentumScore(liquidity, volume, change, buys, sells) {
     + Math.log10(trades + 1) * 7
 }
 
+function qualityScore(liquidity, volume, change, buys, sells, ageHours, marketCap) {
+  const safeLiquidity = Math.max(0, liquidity || 0)
+  const safeVolume = Math.max(0, volume || 0)
+  const safeBuys = Math.max(0, buys || 0)
+  const safeSells = Math.max(0, sells || 0)
+  const trades = safeBuys + safeSells
+  const buyRatio = trades ? safeBuys / trades : 0.5
+  const participation = Math.min(1, trades / 500)
+  const liquidityQuality = Math.min(1, Math.log10(safeLiquidity + 1) / 5.5)
+  const volumeQuality = Math.min(1, Math.log10(safeVolume + 1) / 5)
+  const positiveMove = Math.max(0, Math.min(100, change || 0))
+  const ageQuality = ageHours >= 1 && ageHours <= 72 ? 1 : Math.max(0.35, 1 - Math.max(0, ageHours - 72) / 720)
+  const marketCapQuality = marketCap > 0 ? Math.min(1, Math.log10(marketCap + 1) / 7) : 0.5
+  const balancedActivity = 1 - Math.min(0.45, Math.abs(0.5 - buyRatio))
+
+  return Math.round((liquidityQuality * 28
+    + volumeQuality * 22
+    + participation * 18
+    + balancedActivity * 12
+    + Math.min(positiveMove, 40) / 40 * 10
+    + marketCapQuality * 5
+    + ageQuality * 5) * 10) / 10
+}
+
 function growthLabel(change, buys, sells, ageHours) {
   if (change !== null && change >= 20) return 'FAST GROWER'
   if ((buys || 0) + (sells || 0) >= 150) return 'HIGH ACTIVITY'
@@ -117,6 +141,7 @@ function candidateFromPair(profile, pair) {
 
   const ageHours = ageMs / 3_600_000
   const score = momentumScore(liquidity, volume, change, buys, sells)
+  const quality = qualityScore(liquidity, volume, change, buys, sells, ageMs / 3_600_000, numberOrNull(pair.marketCap))
   return {
     address,
     chainId: pair.chainId,
@@ -135,6 +160,8 @@ function candidateFromPair(profile, pair) {
     buys24h: buys || 0,
     sells24h: sells || 0,
     momentumScore: Math.round(score * 10) / 10,
+    qualityScore: quality,
+    qualityTier: quality >= 70 ? 'STRONG' : quality >= 55 ? 'WATCH' : 'EARLY',
     momentumLabel: growthLabel(change, buys, sells, ageHours),
     promoted: Boolean(profile.promoted),
     boostAmount: numberOrNull(profile.totalAmount ?? profile.amount) || 0,
@@ -348,7 +375,8 @@ async function updateTrendingCoins(limit) {
     }
   }
 
-  const candidates = interleaveCandidatesByChain([...candidatesByToken.values()])
+  const candidates = [...candidatesByToken.values()].sort((left, right) =>
+    right.qualityScore - left.qualityScore || right.momentumScore - left.momentumScore)
   const reviewed = []
   const scanLimit = Math.min(candidates.length, limit * 4)
   const scanBatchSize = 8
@@ -374,7 +402,24 @@ async function updateTrendingCoins(limit) {
     reviewed.push(...results.filter((candidate) => candidate.risk.level !== 'danger'))
   }
 
-  const coins = reviewed.slice(0, limit).map(({ _pair, ...coin }, index) => ({ ...coin, rank: index + 1 }))
+  const coins = reviewed
+    .sort((left, right) => {
+      const riskPenalty = { clear: 4, caution: -4, limited: -8 }
+      const leftScore = left.qualityScore + riskPenalty[left.risk.level]
+      const rightScore = right.qualityScore + riskPenalty[right.risk.level]
+      return rightScore - leftScore || right.momentumScore - left.momentumScore
+    })
+    .slice(0, limit)
+    .map(({ _pair, ...coin }, index) => {
+      const riskAdjustment = { clear: 4, caution: -4, limited: -8 }[coin.risk.level] || 0
+      const qualityScore = Math.max(0, Math.min(100, Math.round((coin.qualityScore + riskAdjustment) * 10) / 10))
+      return {
+        ...coin,
+        qualityScore,
+        qualityTier: qualityScore >= 70 ? 'STRONG' : qualityScore >= 55 ? 'WATCH' : 'EARLY',
+        rank: index + 1,
+      }
+    })
   cachedCoins = coins
   cachedAt = Date.now()
   return coins

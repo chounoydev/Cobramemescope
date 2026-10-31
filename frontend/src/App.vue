@@ -12,12 +12,14 @@ import MarketCoinDetail from './components/MarketCoinDetail.vue'
 import OwnerDonorDashboard from './components/OwnerDonorDashboard.vue'
 import ScanReport from './components/ScanReport.vue'
 import TokenLogo from './components/TokenLogo.vue'
+import TaskCenter from './components/TaskCenter.vue'
+import PromoteToken from './components/PromoteToken.vue'
 import TrendingTable from './components/TrendingTable.vue'
 import WalletButton from './components/WalletButton.vue'
 import { fetchAdminAccess, fetchContractScan, fetchDonorDashboard, fetchLandingEvents, fetchMarket, fetchSiteTheme, fetchTrackedMarketUpdates, fetchTrendingMemecoins, recordSiteActivity, sampleCoins, type Coin, type ContractScan, type DonorDashboard, type LandingEvent, type SeasonalTheme, type TrendingMemecoin } from './lib/api'
 import { formatCurrency } from './lib/currency'
 
-type AppPage = 'landing' | 'scanner' | 'markets' | 'watchlist'
+type AppPage = 'landing' | 'scanner' | 'markets' | 'watchlist' | 'tasks' | 'promote'
 type AdminSection = 'content' | 'donors' | 'chat'
 type WalletSession = { address: string; token: string } | null
 type WatchlistPriceAlert = {
@@ -315,7 +317,6 @@ const trendingUpdatedAt = ref(cachedTrendingFeed?.updatedAt ?? new Date())
 const trendingSearchQuery = ref('')
 const trendingMode = ref<'all' | 'fast' | 'clear' | 'boosted'>('all')
 const selectedTrendingChain = ref('all')
-const showAllTrending = ref(false)
 const notificationsOpen = ref(false)
 const watchlistAlerts = ref<WatchlistPriceAlert[]>(readWatchlistAlerts())
 const donationNotifications = ref<DonationNotification[]>(readDonationNotifications())
@@ -411,8 +412,7 @@ const visibleTrendingCoins = computed(() => {
   if (trendingMode.value === 'boosted') return matchingCoins.filter((coin) => coin.promoted)
   return matchingCoins
 })
-const displayedTrendingCoins = computed(() => visibleTrendingCoins.value.slice(0, showAllTrending.value ? 50 : 20))
-const remainingTrendingCount = computed(() => Math.max(0, visibleTrendingCoins.value.length - displayedTrendingCoins.value.length))
+const displayedTrendingCoins = computed(() => visibleTrendingCoins.value.slice(0, 100))
 const unreadNotificationCount = computed(() => watchlistAlerts.value.filter((alert) => !alert.read).length + donationNotifications.value.filter((notification) => !notification.read).length)
 const tickerTrendingCoins = computed(() => [...trendingCoins.value].sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h)))
 const totalTrendingLiquidity = computed(() => trendingCoins.value.reduce((total, coin) => total + coin.liquidityUsd, 0))
@@ -768,6 +768,14 @@ function goToScanner() {
   scanError.value = ''
 }
 
+function openTaskCenter() {
+  activePage.value = 'tasks'
+}
+
+function openAccountLogin() {
+  window.dispatchEvent(new Event('memescope:open-login'))
+}
+
 function navigateToLanding() {
   activePage.value = 'landing'
   notificationsOpen.value = false
@@ -807,10 +815,15 @@ async function loadAdminAccess(session: Exclude<WalletSession, null>) {
     adminRole.value = access.role
     if (access.role !== 'owner' && adminSection.value === 'donors') adminSection.value = 'content'
     navigateToAdminPortal()
-  } catch {
+  } catch (error) {
     if (walletSession.value?.token !== session.token) return
     adminRole.value = null
-    adminAccessError.value = 'This wallet is not authorized for the private admin portal.'
+    const message = error instanceof Error ? error.message : 'The admin access request could not be completed.'
+    adminAccessError.value = /invalid|expired/i.test(message)
+      ? 'Your admin session has expired. Sign out, then sign in again with the approved wallet.'
+      : /not authorized|staff|owner/i.test(message)
+        ? message
+        : 'Could not complete the admin request. Verify your backend connection and sign in again.'
   }
 }
 
@@ -969,7 +982,7 @@ onMounted(() => {
   refreshTimer = window.setInterval(() => {
     void loadLandingEvents()
     void loadTrending()
-  }, 60_000)
+  }, 30_000)
   siteThemeTimer = window.setInterval(() => { void loadSiteTheme() }, 15_000)
 
   landingSlideTimer = window.setInterval(() => {
@@ -1100,6 +1113,8 @@ onUnmounted(() => {
         <button type="button" :class="{ selected: activePage === 'scanner' }" :aria-current="activePage === 'scanner' ? 'page' : undefined" @click="goToScanner">analyze token<i>⌕</i></button>
         <button type="button" :class="{ selected: activePage === 'markets' }" :aria-current="activePage === 'markets' ? 'page' : undefined" @click="activePage = 'markets'">market tape<i>↗</i></button>
         <button type="button" :class="{ selected: activePage === 'watchlist' }" :aria-current="activePage === 'watchlist' ? 'page' : undefined" @click="activePage = 'watchlist'">watchlist<i class="nav-watchlist-icon"><span aria-hidden="true">☆</span><small>{{ (favorites.length + savedTrendingCoins.length).toString().padStart(2, '0') }}</small></i></button>
+        <button type="button" :class="{ selected: activePage === 'tasks' }" :aria-current="activePage === 'tasks' ? 'page' : undefined" @click="openTaskCenter">tasks<i>+</i></button>
+        <button type="button" :class="{ selected: activePage === 'promote' }" :aria-current="activePage === 'promote' ? 'page' : undefined" @click="activePage = 'promote'">promote<i>↗</i></button>
       </nav>
       <div class="scanner-nav-label chain-label">SUPPORTED CHAINS</div>
       <div class="chain-list">
@@ -1174,6 +1189,14 @@ onUnmounted(() => {
                 <p>{{ currentAnnouncement.description }}</p>
                 <div class="announcement-slide-footer">
                   <span>COBRA MEMESCOPE COMMUNITY UPDATE</span>
+                  <button
+                    v-if="currentAnnouncement.cta"
+                    type="button"
+                    class="announcement-slide-cta"
+                    @click="currentSlide = landingSlides.length ? (currentSlide + 1) % landingSlides.length : 0"
+                  >
+                    {{ currentAnnouncement.cta }} <span aria-hidden="true">↗</span>
+                  </button>
                 </div>
               </div>
               <span class="landing-announcement-number">{{ String((currentSlide % landingSlides.length) + 1).padStart(2, '0') }}</span>
@@ -1192,6 +1215,90 @@ onUnmounted(() => {
             <p>Cobra MemeScope is an educational research tool for people new to memecoins and experienced traders alike. It does not accept deposits, buy or sell crypto, or hold your funds. Connect a wallet to view its SOL balance and detected memecoin holdings; your assets remain in your wallet. Any optional wallet transaction, such as a donation, must be initiated and approved by you in your wallet.</p>
           </aside>
           <button type="button" class="landing-intro-action" @click="activePage = 'markets'">EXPLORE LIVE MARKETS <span aria-hidden="true">↗</span></button>
+        </section>
+
+        <section class="landing-platform" aria-labelledby="landing-platform-title">
+          <div class="landing-section-heading">
+            <div>
+              <div class="scan-eyebrow"><span></span> THE COBRA MEMESCOPE PLATFORM</div>
+              <h2 id="landing-platform-title">One risk desk for the memecoin market.</h2>
+            </div>
+            <p>Cobra MemeScope brings discovery, market context, contract screening, and personal tracking together so users can investigate faster and make more informed decisions.</p>
+          </div>
+          <div class="landing-feature-grid">
+            <article>
+              <span>01</span>
+              <strong>Live Market Tape</strong>
+              <p>Follow active pairs across supported chains, rank launches by quality, and monitor liquidity, volume, movement, and buys versus sells.</p>
+              <button type="button" @click="activePage = 'markets'">OPEN MARKET TAPE <b>↗</b></button>
+            </article>
+            <article>
+              <span>02</span>
+              <strong>Contract Risk Scanner</strong>
+              <p>Check token controls, holder concentration, tax signals, liquidity, and available provider risk data before a deeper review.</p>
+              <button type="button" @click="activePage = 'scanner'">ANALYZE A TOKEN <b>↗</b></button>
+            </article>
+            <article>
+              <span>03</span>
+              <strong>Watchlists &amp; Tracking</strong>
+              <p>Save promising pairs, review them in one place, and keep an eye on changing market conditions without losing your research trail.</p>
+              <button type="button" @click="activePage = 'watchlist'">VIEW WATCHLIST <b>↗</b></button>
+            </article>
+            <article>
+              <span>04</span>
+              <strong>Cross-Chain Intelligence</strong>
+              <p>Compare Solana, EVM, and other supported ecosystems through a consistent interface built to surface relevant on-chain context.</p>
+              <button type="button" @click="activePage = 'markets'">EXPLORE CHAINS <b>↗</b></button>
+            </article>
+          </div>
+        </section>
+
+        <section class="landing-roadmap" aria-labelledby="landing-roadmap-title">
+          <div class="landing-section-heading roadmap-heading">
+            <div>
+              <div class="scan-eyebrow"><span></span> COBRA MEMESCOPE ROADMAP</div>
+              <h2 id="landing-roadmap-title">Built for the next stage of research.</h2>
+            </div>
+            <p>Shipping in focused stages so every new signal improves discovery, clarity, and decision support without overstating certainty.</p>
+          </div>
+          <div class="roadmap-track">
+            <article class="roadmap-stage roadmap-complete">
+              <span>01 · LIVE NOW</span>
+              <strong>Research foundation</strong>
+              <p>Cross-chain market discovery, live quality scoring, contract review, liquidity tracking, and watchlists.</p>
+            </article>
+            <article class="roadmap-stage roadmap-complete">
+              <span>02 · LIVE NOW</span>
+              <strong>Mobile-ready desk</strong>
+              <p>Responsive terminal views and installable app access for monitoring from desktop or mobile.</p>
+            </article>
+            <article class="roadmap-stage">
+              <span>03 · IN DEVELOPMENT</span>
+              <strong>Deeper alerts &amp; intelligence</strong>
+              <p>Advanced watchlist alerts, historical trend context, stronger risk grouping, and personalized market views.</p>
+            </article>
+            <article class="roadmap-stage">
+              <span>04 · NEXT</span>
+              <strong>Community research tools</strong>
+              <p>Shared lists, research annotations, portfolio-level context, and transparent product updates.</p>
+            </article>
+          </div>
+          <div class="cobra-token-launch" role="status">
+            <div>
+              <span>COBRA MEMESCOPE TOKEN</span>
+              <strong>$COBRA</strong>
+            </div>
+            <p>The Cobra MemeScope community coin is launching soon. Launch timing and official contract details will be announced through verified Cobra MemeScope channels only.</p>
+            <b>LAUNCHING SOON</b>
+          </div>
+          <div class="cobra-referral-rewards">
+            <div>
+              <span>COBRA COMMUNITY REWARDS</span>
+              <strong>Invite friends. Earn points. Unlock more.</strong>
+            </div>
+            <p>Earn <b>500 points for every successful friend invitation</b>. Rewards can be converted to $COBRA after launch and used to join selected Cobra MemeScope community events, drops, and experiences.</p>
+          </div>
+          <small>Roadmap timing is subject to provider availability, data quality, testing, and product priorities.</small>
         </section>
 
         <section class="mobile-install-card" aria-labelledby="mobile-install-title">
@@ -1249,6 +1356,12 @@ onUnmounted(() => {
         <p class="scan-disclaimer">A scan is a point-in-time indicator, not an audit or a guarantee. Unknown checks are not clean checks.</p>
       </section>
 
+      <section v-else-if="activePage === 'tasks'" class="market-page task-center-market-page">
+        <TaskCenter :token="walletSession?.token" @open-login="openAccountLogin" />
+      </section>
+      <section v-else-if="activePage === 'promote'" class="market-page promotion-market-page">
+        <PromoteToken :token="walletSession?.token" @open-login="openAccountLogin" />
+      </section>
       <section v-else class="market-page">
         <div class="market-page-head">
           <div>
@@ -1261,20 +1374,20 @@ onUnmounted(() => {
           <div class="market-totals"><div><span>FRESH PAIRS</span><strong>{{ trendingCoins.length }}</strong></div><div><span>COMBINED LIQUIDITY</span><strong>{{ formatCurrency(totalTrendingLiquidity, true) }}</strong></div><div><span>24H VOLUME</span><strong>{{ formatCurrency(totalTrendingVolume, true) }}</strong></div><div><span>FAST GROWERS</span><strong>{{ fastGrowerCount }}</strong></div></div>
           <div class="discovery-controls">
             <div class="discovery-tabs" role="tablist" aria-label="Filter new launches">
-              <button type="button" role="tab" :aria-selected="trendingMode === 'all'" :class="{ active: trendingMode === 'all' }" @click="trendingMode = 'all'; showAllTrending = false">ALL LAUNCHES <span>{{ trendingCoins.length }}</span></button>
-              <button type="button" role="tab" :aria-selected="trendingMode === 'fast'" :class="{ active: trendingMode === 'fast' }" @click="trendingMode = 'fast'; showAllTrending = false">FAST GROWERS <span>{{ fastGrowerCount }}</span></button>
-              <button type="button" role="tab" :aria-selected="trendingMode === 'clear'" :class="{ active: trendingMode === 'clear' }" @click="trendingMode = 'clear'; showAllTrending = false">REVIEW CLEAR <span>{{ trendingCoins.filter((coin) => coin.risk.level === 'clear').length }}</span></button>
-              <button type="button" role="tab" :aria-selected="trendingMode === 'boosted'" :class="{ active: trendingMode === 'boosted' }" @click="trendingMode = 'boosted'; showAllTrending = false">BOOSTED COINS <span>{{ boostedCoinCount }}</span></button>
+              <button type="button" role="tab" :aria-selected="trendingMode === 'all'" :class="{ active: trendingMode === 'all' }" @click="trendingMode = 'all'">ALL LAUNCHES <span>{{ trendingCoins.length }}</span></button>
+              <button type="button" role="tab" :aria-selected="trendingMode === 'fast'" :class="{ active: trendingMode === 'fast' }" @click="trendingMode = 'fast'">FAST GROWERS <span>{{ fastGrowerCount }}</span></button>
+              <button type="button" role="tab" :aria-selected="trendingMode === 'clear'" :class="{ active: trendingMode === 'clear' }" @click="trendingMode = 'clear'">REVIEW CLEAR <span>{{ trendingCoins.filter((coin) => coin.risk.level === 'clear').length }}</span></button>
+              <button type="button" role="tab" :aria-selected="trendingMode === 'boosted'" :class="{ active: trendingMode === 'boosted' }" @click="trendingMode = 'boosted'">BOOSTED COINS <span>{{ boostedCoinCount }}</span></button>
             </div>
             <label class="market-search discovery-search">
               <span aria-hidden="true">⌕</span>
-              <input v-model="trendingSearchQuery" type="search" placeholder="Search memecoins" aria-label="Search memecoins by name, ticker, or contract address" @input="showAllTrending = false" />
+              <input v-model="trendingSearchQuery" type="search" placeholder="Search memecoins" aria-label="Search memecoins by name, ticker, or contract address" />
             </label>
           </div>
           <div class="chain-filters" role="group" aria-label="Filter launches by chain">
             <span>CHAIN</span>
-            <button type="button" :class="{ active: selectedTrendingChain === 'all' }" :aria-pressed="selectedTrendingChain === 'all'" @click="selectedTrendingChain = 'all'; showAllTrending = false">All chains <small>{{ trendingCoins.length }}</small></button>
-            <button v-for="chain in supportedChains" :key="chain.chainId" type="button" :class="{ active: selectedTrendingChain === chain.chainId }" :aria-pressed="selectedTrendingChain === chain.chainId" @click="selectedTrendingChain = chain.chainId; showAllTrending = false">
+            <button type="button" :class="{ active: selectedTrendingChain === 'all' }" :aria-pressed="selectedTrendingChain === 'all'" @click="selectedTrendingChain = 'all'">All chains <small>{{ trendingCoins.length }}</small></button>
+            <button v-for="chain in supportedChains" :key="chain.chainId" type="button" :class="{ active: selectedTrendingChain === chain.chainId }" :aria-pressed="selectedTrendingChain === chain.chainId" @click="selectedTrendingChain = chain.chainId">
               <span class="filter-chain-logo" v-html="chain.logoSvg" aria-hidden="true"></span>
               <span>{{ chain.name }}</span>
               <small>{{ chain.count }}</small>
@@ -1313,8 +1426,7 @@ onUnmounted(() => {
           <div v-else-if="trendingMode === 'clear' && visibleTrendingCoins.length === 0" class="market-empty"><strong>No fully clear reviews in the current fresh pool list.</strong><span>That does not make other tokens safe; their review may have warnings or missing data.</span></div>
           <div v-else-if="trendingMode === 'boosted' && visibleTrendingCoins.length === 0" class="market-empty"><strong>No boosted coins found in the current fresh pool list.</strong><span>Boosted listings will appear here when they match the current launch and market data filters.</span></div>
           <TrendingTable v-else :coins="displayedTrendingCoins" :watchlist-keys="savedTrendingKeys" :liquidity-changes="liquidityChanges" @scan="scanTrendingCoin" @select="selectMarketCoin" @watchlist-toggle="toggleTrendingWatchlist" />
-          <div v-if="visibleTrendingCoins.length > 20" class="show-more-launches"><span>Showing {{ displayedTrendingCoins.length }} of {{ visibleTrendingCoins.length }} launches</span><button type="button" @click="showAllTrending = !showAllTrending">{{ showAllTrending ? 'SHOW LESS' : `SHOW ${remainingTrendingCount} MORE` }} <span>{{ showAllTrending ? '↑' : '↓' }}</span></button></div>
-          <div class="market-foot"><span>Showing up to 50 qualified pools from supported chains, created within the last 30 days.</span><span>Explicit high-risk reviews are excluded when detected. A clear review is not a safety guarantee.</span></div>
+          <div class="market-foot"><span>Showing up to 100 ranked pools from supported chains, created within the last 30 days.</span><span>Quality tiers combine liquidity, volume, activity, momentum, and review data; they are not safety guarantees.</span></div>
         </template>
 
         <template v-else>
@@ -1877,6 +1989,217 @@ onUnmounted(() => {
   font-size: 1.1rem;
 }
 
+.landing-platform,
+.landing-roadmap {
+  display: grid;
+  gap: 22px;
+  margin-bottom: 24px;
+}
+
+.landing-section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  align-items: end;
+  gap: 28px;
+}
+
+.landing-section-heading h2 {
+  max-width: 760px;
+  margin: 10px 0 0;
+  color: #edf4f6;
+  font-size: clamp(2rem, 3vw, 2.8rem);
+  letter-spacing: -0.055em;
+}
+
+.landing-section-heading > p {
+  margin: 0;
+  color: rgba(193, 210, 215, 0.78);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.landing-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.landing-feature-grid article {
+  display: flex;
+  min-height: 250px;
+  flex-direction: column;
+  padding: 22px;
+  border: 1px solid rgba(160, 177, 181, 0.22);
+  background: linear-gradient(145deg, rgba(14, 38, 43, 0.94), rgba(8, 26, 32, 0.94));
+}
+
+.landing-feature-grid article > span {
+  color: #6ef9ae;
+  font: 700 0.72rem 'DM Mono', monospace;
+}
+
+.landing-feature-grid article > strong {
+  margin-top: 46px;
+  color: #edf4f6;
+  font-size: 1.15rem;
+}
+
+.landing-feature-grid article > p {
+  margin: 12px 0 18px;
+  color: rgba(193, 210, 215, 0.74);
+  font-size: 0.88rem;
+  line-height: 1.65;
+}
+
+.landing-feature-grid button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid rgba(160, 177, 181, 0.18);
+  background: transparent;
+  color: #8df9ba;
+  font: 700 0.68rem 'DM Mono', monospace;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.landing-feature-grid button b {
+  font-size: 1rem;
+}
+
+.landing-roadmap {
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid rgba(122, 247, 179, 0.22);
+  background: linear-gradient(125deg, rgba(10, 35, 41, 0.96), rgba(5, 23, 29, 0.96));
+}
+
+.roadmap-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid rgba(122, 247, 179, 0.22);
+}
+
+.roadmap-stage {
+  position: relative;
+  min-height: 180px;
+  padding: 28px 22px 10px 0;
+}
+
+.roadmap-stage:not(:last-child) {
+  margin-right: 18px;
+  border-right: 1px solid rgba(160, 177, 181, 0.16);
+}
+
+.roadmap-stage::before {
+  position: absolute;
+  top: -6px;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #596d72;
+  content: '';
+}
+
+.roadmap-stage.roadmap-complete::before {
+  background: #7af7b3;
+  box-shadow: 0 0 18px rgba(122, 247, 179, 0.55);
+}
+
+.roadmap-stage > span {
+  color: #8ea4a8;
+  font: 700 0.68rem 'DM Mono', monospace;
+  letter-spacing: 0.06em;
+}
+
+.roadmap-stage.roadmap-complete > span {
+  color: #8df9ba;
+}
+
+.roadmap-stage strong {
+  display: block;
+  margin-top: 18px;
+  color: #edf4f6;
+  font-size: 1rem;
+}
+
+.roadmap-stage p {
+  margin: 10px 0 0;
+  color: rgba(193, 210, 215, 0.72);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.landing-roadmap > small {
+  color: rgba(193, 210, 215, 0.48);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.cobra-token-launch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 20px;
+  border: 1px solid rgba(122, 247, 179, 0.42);
+  background:
+    radial-gradient(circle at 10% 50%, rgba(122, 247, 179, 0.14), transparent 22%),
+    rgba(5, 23, 29, 0.78);
+}
+
+.cobra-token-launch > div {
+  display: grid;
+  gap: 4px;
+}
+
+.cobra-token-launch > div span {
+  color: #8ea4a8;
+  font: 700 0.62rem 'DM Mono', monospace;
+  letter-spacing: 0.08em;
+}
+
+.cobra-token-launch > div strong {
+  color: #8df9ba;
+  font-size: 1.75rem;
+  letter-spacing: -0.04em;
+}
+
+.cobra-token-launch p {
+  margin: 0;
+  color: rgba(193, 210, 215, 0.78);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.cobra-token-launch > b {
+  padding: 8px 10px;
+  border: 1px solid rgba(122, 247, 179, 0.38);
+  color: #8df9ba;
+  font: 800 0.68rem 'DM Mono', monospace;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.cobra-referral-rewards {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+  align-items: center;
+  gap: 24px;
+  padding: 18px 20px;
+  border: 1px solid rgba(160, 177, 181, 0.18);
+  background: rgba(3, 20, 25, 0.68);
+}
+.cobra-referral-rewards > div { display: grid; gap: 6px; }
+.cobra-referral-rewards > div span { color: #8ea4a8; font: 700 0.62rem 'DM Mono', monospace; letter-spacing: 0.08em; }
+.cobra-referral-rewards > div strong { color: #edf4f6; font-size: 1.08rem; }
+.cobra-referral-rewards p { margin: 0; color: rgba(193, 210, 215, 0.78); font-size: 0.86rem; line-height: 1.55; }
+.cobra-referral-rewards p b { color: #8df9ba; }
+
 .landing-announcements {
   display: grid;
   min-width: 0;
@@ -2095,6 +2418,25 @@ onUnmounted(() => {
   color: #89a2a6;
   font: 700 0.7rem 'DM Mono', monospace;
   letter-spacing: 0.1em;
+}
+.announcement-slide-cta {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 8px 12px;
+  border: 1px solid rgba(122, 247, 179, 0.42);
+  border-radius: 4px;
+  background: transparent;
+  color: #8df9ba;
+  font: 700 0.68rem 'DM Mono', monospace;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.announcement-slide-cta span {
+  margin-left: 5px;
+}
+.announcement-slide-cta:hover {
+  border-color: rgba(122, 247, 179, 0.72);
+  background: rgba(122, 247, 179, 0.08);
 }
 
 .announcement-caption,
@@ -2764,6 +3106,50 @@ onUnmounted(() => {
     width: 100%;
     justify-content: space-between;
   }
+
+  .landing-section-heading {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .landing-feature-grid,
+  .roadmap-track {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-feature-grid article {
+    min-height: 0;
+  }
+
+  .landing-feature-grid article > strong {
+    margin-top: 24px;
+  }
+
+  .roadmap-track {
+    gap: 0;
+  }
+
+  .roadmap-stage {
+    min-height: 0;
+    padding: 26px 0 18px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(160, 177, 181, 0.16);
+  }
+
+  .roadmap-stage:not(:last-child) {
+    margin-right: 0;
+    border-right: 0;
+  }
+
+  .cobra-token-launch {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .cobra-token-launch > b {
+    justify-self: start;
+  }
+  .cobra-referral-rewards { grid-template-columns: 1fr; gap: 10px; }
 }
 
 @media (min-width: 761px) and (max-width: 900px) {
@@ -2840,6 +3226,92 @@ onUnmounted(() => {
   height: 112px;
   border-radius: 50%;
   object-fit: cover;
+}
+
+.task-center-market-page {
+  display: block;
+  max-width: 1180px;
+}
+
+.task-center-page {
+  display: grid;
+  gap: 20px;
+  padding-bottom: 64px;
+}
+
+.task-center-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.task-center-header h1 {
+  margin: 10px 0 8px;
+  color: #edf4f4;
+  font-size: clamp(2rem, 5vw, 4rem);
+  line-height: 0.95;
+}
+
+.task-center-header h1 em { color: #89f0b1; font-style: normal; }
+.task-center-header p { margin: 0; color: #91a0a4; }
+.task-total { min-width: 190px; padding: 18px; border: 1px solid rgba(143, 224, 170, .24); background: rgba(91, 177, 126, .08); border-radius: 12px; }
+.task-total span, .task-label { color: #78d99d; font: 700 .68rem 'DM Mono', monospace; letter-spacing: .12em; }
+.task-total strong { display: block; margin-top: 6px; color: white; font-size: 1.8rem; }
+.task-total small { font-size: .68rem; color: #91a0a4; }
+
+.task-login-panel, .daily-login-card, .task-mission-panel {
+  border: 1px solid rgba(174, 195, 199, .14);
+  border-radius: 16px;
+  background: rgba(7, 18, 19, .92);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .18);
+}
+
+.task-login-panel { padding: 38px; text-align: center; }
+.task-login-panel span { color: #78d99d; font: 700 .68rem 'DM Mono', monospace; letter-spacing: .12em; }
+.task-login-panel h2 { margin: 12px 0 8px; font-size: 2rem; }
+.task-login-panel p { color: #91a0a4; }
+.task-login-panel button, .daily-login-card button, .task-mission-row button {
+  min-height: 42px; border: 0; border-radius: 8px; background: #8ff0b1; color: #092019;
+  font: 800 .72rem 'DM Mono', monospace; letter-spacing: .06em; cursor: pointer; transition: transform .18s ease, opacity .18s ease;
+}
+.task-login-panel button:hover, .daily-login-card button:hover, .task-mission-row button:hover { transform: translateY(-1px); }
+button:disabled { opacity: .55; cursor: not-allowed; transform: none !important; }
+
+.daily-login-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(150px, .25fr);
+  gap: 24px;
+  align-items: center;
+  padding: 28px;
+}
+.daily-login-copy h2, .task-section-head h2 { margin: 7px 0 6px; font-size: 1.35rem; }
+.daily-login-copy p { max-width: 620px; margin: 0; color: #91a0a4; line-height: 1.55; }
+.streak-score { display: flex; gap: 12px; }
+.streak-score span { min-width: 96px; padding: 12px; border-radius: 10px; background: rgba(141, 240, 177, .07); text-align: center; color: #dff9e8; font-size: 1.8rem; font-weight: 800; }
+.streak-score small { display: block; color: #819096; font-size: .58rem; }
+.daily-login-card button { padding: 0 18px; }
+.task-center-error { margin: 0; padding: 12px 14px; border: 1px solid rgba(255, 112, 112, .28); border-radius: 8px; background: rgba(255, 72, 72, .08); color: #ffc3c3; }
+
+.task-mission-panel { overflow: hidden; }
+.task-section-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px; border-bottom: 1px solid rgba(174, 195, 199, .1); }
+.task-section-head span:last-child { color: #819096; font: 700 .65rem 'DM Mono', monospace; letter-spacing: .08em; }
+.task-mission-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 120px 130px; gap: 16px; align-items: center; padding: 18px 24px; border-bottom: 1px solid rgba(174, 195, 199, .08); }
+.task-mission-row:last-child { border-bottom: 0; }
+.task-status-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: rgba(143, 240, 177, .1); color: #8ff0b1; font-weight: 800; }
+.task-mission-row strong { color: #edf4f4; }
+.task-mission-row p { margin: 4px 0 0; color: #819096; font-size: .86rem; }
+.task-mission-row > span { color: #8ff0b1; font: 700 .72rem 'DM Mono', monospace; text-align: right; }
+.task-mission-row button { padding: 0 12px; }
+
+@media (max-width: 760px) {
+  .task-center-header, .daily-login-card { align-items: stretch; flex-direction: column; display: grid; grid-template-columns: 1fr; }
+  .daily-login-card { grid-template-columns: 1fr; }
+  .task-total { min-width: 0; }
+  .streak-score span { flex: 1; }
+  .task-mission-row { grid-template-columns: 42px 1fr; }
+  .task-mission-row > span { grid-column: 2; text-align: left; }
+  .task-mission-row button { grid-column: 2; }
 }
 
 .banned-access-slash {

@@ -6,6 +6,11 @@ const scanLimit = 100
 const donationWindowMs = 30 * 24 * 60 * 60 * 1000
 const cacheTtlMs = 30_000
 const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+const rpcUrls = [...new Set([
+  rpcUrl,
+  'https://solana-rpc.publicnode.com',
+  'https://api.mainnet-beta.solana.com',
+].filter(Boolean))]
 
 let cachedDashboard = null
 let cachedAt = 0
@@ -20,16 +25,24 @@ async function getOptionalLoginStats() {
 }
 
 async function rpc(method, params) {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    signal: AbortSignal.timeout(12_000),
-  })
-  if (!response.ok) throw new Error('Solana RPC request failed.')
-  const payload = await response.json()
-  if (payload.error) throw new Error('Solana RPC returned an error.')
-  return payload.result
+  let lastError = null
+  for (const url of rpcUrls) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: AbortSignal.timeout(12_000),
+      })
+      if (!response.ok) throw new Error(`Solana RPC request failed (${response.status}).`)
+      const payload = await response.json()
+      if (payload.error) throw new Error(payload.error.message || 'Solana RPC returned an error.')
+      return payload.result
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError || new Error('Solana RPC request failed.')
 }
 
 function inboundTransfers(transaction, signature) {
@@ -74,7 +87,13 @@ export async function getDonorDashboard() {
     return { ...cachedDashboard, ...await getOptionalLoginStats(), updatedAt: new Date().toISOString() }
   }
 
-  const signatures = await rpc('getSignaturesForAddress', [ADMIN_WALLET_ADDRESS, { commitment: 'confirmed', limit: scanLimit }])
+  let signatures = []
+  let rpcError = null
+  try {
+    signatures = await rpc('getSignaturesForAddress', [ADMIN_WALLET_ADDRESS, { commitment: 'confirmed', limit: scanLimit }])
+  } catch (error) {
+    rpcError = error instanceof Error ? error.message : 'Solana network activity is temporarily unavailable.'
+  }
   const transfers = []
   for (let index = 0; index < signatures.length; index += 5) {
     const batch = await Promise.all(signatures.slice(index, index + 5).map(fetchTransaction))
@@ -100,6 +119,7 @@ export async function getDonorDashboard() {
 
   cachedDashboard = {
     ownerAddress: ADMIN_WALLET_ADDRESS,
+    rpcError,
     windowDays: 30,
     scannedTransactions: signatures.length,
     decodedTransfers: transfers.length,
