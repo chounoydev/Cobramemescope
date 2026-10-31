@@ -75,7 +75,6 @@ export function createEvmWalletChallenge(address, chainId, origin, purpose = 'Si
 
 export function verifyWalletChallenge(address, nonce, signature) {
   const challenge = challenges.get(nonce)
-  challenges.delete(nonce)
   if (!challenge || challenge.type !== 'solana' || challenge.expiresAt <= Date.now() || challenge.walletAddress !== address) return false
   if (!Array.isArray(signature) || signature.length !== 64 || signature.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) return false
 
@@ -85,7 +84,9 @@ export function verifyWalletChallenge(address, nonce, signature) {
       format: 'der',
       type: 'spki',
     })
-    return verify(null, Buffer.from(challenge.message, 'utf8'), key, Buffer.from(signature))
+    const valid = verify(null, Buffer.from(challenge.message, 'utf8'), key, Buffer.from(signature))
+    if (valid) challenges.delete(nonce)
+    return valid
   } catch {
     return false
   }
@@ -93,12 +94,13 @@ export function verifyWalletChallenge(address, nonce, signature) {
 
 export function verifyEvmWalletChallenge(address, nonce, signature) {
   const challenge = challenges.get(nonce)
-  challenges.delete(nonce)
   if (!challenge || challenge.type !== 'evm' || challenge.expiresAt <= Date.now() || challenge.walletAddress !== address.toLowerCase()) return false
   if (typeof signature !== 'string' || !/^0x[a-fA-F0-9]{130}$/.test(signature)) return false
 
   try {
-    return verifyMessage(challenge.message, signature).toLowerCase() === challenge.walletAddress
+    const valid = verifyMessage(challenge.message, signature).toLowerCase() === challenge.walletAddress
+    if (valid) challenges.delete(nonce)
+    return valid
   } catch {
     return false
   }

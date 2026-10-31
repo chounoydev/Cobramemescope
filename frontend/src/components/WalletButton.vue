@@ -151,6 +151,8 @@ const profileSaving = ref(false)
 const emailAddress = ref('')
 const emailPassword = ref('')
 const confirmPassword = ref('')
+const showEmailPassword = ref(false)
+const showConfirmPassword = ref(false)
 const emailMode = ref<'signin' | 'signup'>('signup')
 const authView = ref<'signin' | 'signup' | 'wallet'>('signup')
 const usernameAvailability = ref<'idle' | 'checking' | 'available' | 'taken' | 'unavailable'>('idle')
@@ -1571,10 +1573,16 @@ onBeforeUnmount(() => {
           <label for="email-address">EMAIL ADDRESS</label>
           <input id="email-address" v-model="emailAddress" type="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="you@example.com" required />
           <label for="email-password">PASSWORD</label>
-          <input id="email-password" v-model="emailPassword" type="password" :autocomplete="emailMode === 'signup' ? 'new-password' : 'current-password'" minlength="10" maxlength="128" placeholder="At least 10 characters" required />
+          <div class="password-field">
+            <input id="email-password" v-model="emailPassword" :type="showEmailPassword ? 'text' : 'password'" :autocomplete="emailMode === 'signup' ? 'new-password' : 'current-password'" minlength="10" maxlength="128" placeholder="At least 10 characters" required />
+            <button type="button" :aria-label="showEmailPassword ? 'Hide password' : 'Show password'" :aria-pressed="showEmailPassword" @click="showEmailPassword = !showEmailPassword">{{ showEmailPassword ? 'Hide' : 'Show' }}</button>
+          </div>
           <template v-if="emailMode === 'signup'">
             <label for="confirm-password">CONFIRM PASSWORD</label>
-            <input id="confirm-password" v-model="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Enter your password again" required />
+            <div class="password-field">
+              <input id="confirm-password" v-model="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Enter your password again" required />
+              <button type="button" :aria-label="showConfirmPassword ? 'Hide confirmed password' : 'Show confirmed password'" :aria-pressed="showConfirmPassword" @click="showConfirmPassword = !showConfirmPassword">{{ showConfirmPassword ? 'Hide' : 'Show' }}</button>
+            </div>
           </template>
           <button class="email-submit" type="submit" :disabled="emailBusy"><span>{{ emailBusy ? 'Please wait…' : authView === 'signup' ? 'Create account' : 'Sign in' }}</span><span aria-hidden="true">{{ emailBusy ? '◌' : '→' }}</span></button>
           <button class="email-mode" type="button" @click="toggleEmailMode">{{ authView === 'signin' ? 'New to Cobra MemeScope? Create an account' : 'Already have an account? Sign in' }}</button>
@@ -1708,6 +1716,11 @@ onBeforeUnmount(() => {
 .email-form input::placeholder,.profile-form input::placeholder { color: #778276; }
 .email-form input:hover,.profile-form input:hover { border-color: #51614a; }
 .email-form input:focus,.profile-form input:focus { border-color: #a8cb5c; background: #171f19; box-shadow: 0 0 0 3px rgb(168 203 92 / 14%); }
+.password-field { position: relative; }
+.password-field input { padding-right: 62px !important; }
+.password-field button { position: absolute; top: 50%; right: 8px; min-width: 46px; min-height: 32px; transform: translateY(-50%); border: 0; border-radius: 7px; background: transparent; color: #c7eb6c; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.password-field button:hover { background: rgb(199 235 108 / 10%); }
+.password-field button:focus-visible { outline: 2px solid #c7eb6c; outline-offset: 2px; }
 .email-form input[aria-invalid="true"] { border-color: #c76f66; }
 .auth-field-help,.username-availability { margin-top: -3px; color: #a4b0a3; font-size: 10px; line-height: 1.45; }
 .username-availability.is-checking { color: #b8c5ac; }
