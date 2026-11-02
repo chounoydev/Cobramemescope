@@ -7,7 +7,12 @@ const emit = defineEmits<{ openLogin: [] }>()
 
 const options = ref({ receiver: '', baseDays: 21, basePriceSol: 0.5, periodDays: 21, maxDays: 365, currencies: ['SOL', 'USDC', 'USDT'] })
 const form = ref({ name: '', symbol: '', mintAddress: '', imageUrl: '', websiteUrl: '', socialUrl: '', description: '', days: 21, currency: 'SOL' })
-const promotion = ref<any>(null)
+type TokenPromotion = {
+  id: string
+  [key: string]: unknown
+}
+
+const promotion = ref<TokenPromotion | null>(null)
 const signature = ref('')
 const loading = ref(false)
 const error = ref('')
@@ -21,9 +26,17 @@ const solPrice = computed(() => Number((options.value.basePriceSol * periods.val
 const usdPrice = computed(() => solPrice.value.toFixed(2))
 
 async function load() {
-  options.value = await fetchPromotionOptions()
+  try {
+    options.value = await fetchPromotionOptions()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Could not load promotion pricing.'
+  }
 }
 load()
+
+function openLogin() {
+  emit('openLogin')
+}
 
 async function submit() {
   if (!props.token) return emit('openLogin')
@@ -54,6 +67,7 @@ async function selectImage(event: Event) {
     return
   }
   imageFile.value = file
+  if (imagePreview.value.startsWith('blob:')) URL.revokeObjectURL(imagePreview.value)
   imagePreview.value = URL.createObjectURL(file)
 }
 
@@ -104,7 +118,7 @@ async function verify() {
           <label>Payment currency<select v-model="form.currency"><option v-for="currency in options.currencies" :key="currency">{{ currency }}</option></select></label>
         </div>
         <p class="promotion-warning">Promoted listings do not represent a security endorsement. Users should still review the contract and market risk.</p>
-        <button class="promotion-submit" type="submit" :disabled="loading">{{ promotion ? 'UPDATE / REOPEN SUBMISSION' : token ? `CONTINUE · ${form.currency === 'SOL' ? solPrice.toFixed(2) + ' SOL' : '$' + usdPrice + ' ' + form.currency}` : 'SIGN IN TO PROMOTE' }}</button>
+        <button class="promotion-submit" :type="token ? 'submit' : 'button'" :disabled="loading" @click="token ? undefined : openLogin">{{ promotion ? 'UPDATE / REOPEN SUBMISSION' : token ? `CONTINUE · ${form.currency === 'SOL' ? solPrice.toFixed(2) + ' SOL' : '$' + usdPrice + ' ' + form.currency}` : 'SIGN IN TO PROMOTE' }}</button>
       </form>
       <aside class="promotion-pay">
         <span>CHECKOUT</span><strong>{{ form.currency === 'SOL' ? solPrice.toFixed(2) + ' SOL' : '$' + usdPrice }}</strong><small>{{ solPrice.toFixed(2) }} SOL value · {{ form.days }} days</small>
@@ -174,5 +188,19 @@ img.promotion-example-logo { object-fit:cover; border:0; }
 .promotion-pay p { color:#ffc3c3; }
 .scan-eyebrow { color:#8a999d; font:700 .66rem monospace; letter-spacing:.09em; }.scan-eyebrow span { display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#8ff0b1 }
 @media(max-width:900px){.promotion-layout{grid-template-columns:1fr}.promotion-pay{position:static}.promotion-head{align-items:flex-start;flex-direction:column}}
-@media(max-width:600px){.promotion-grid{grid-template-columns:1fr}.promotion-wide{grid-column:auto}.promotion-form{padding:18px}}
+@media(max-width:600px){
+  .promotion-page{padding-bottom:96px}
+  .promotion-head{width:100%}
+  .promotion-head h1{font-size:2.35rem;overflow-wrap:anywhere}
+  .promotion-duration{width:100%;box-sizing:border-box;min-width:0}
+  .promotion-preview{overflow:hidden}
+  .promotion-token-example{grid-template-columns:46px minmax(0,1fr)}
+  .promotion-example-status{grid-column:2}
+  .promotion-grid{grid-template-columns:minmax(0,1fr)}
+  .promotion-wide{grid-column:auto}
+  .promotion-form{min-width:0;padding:18px}
+  .promotion-form input,.promotion-form textarea,.promotion-form select{width:100%;box-sizing:border-box}
+  .promotion-submit{width:100%;min-height:48px}
+  .promotion-success{width:min(420px,calc(100% - 28px));padding:28px 20px}
+}
 </style>

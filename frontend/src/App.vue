@@ -276,6 +276,7 @@ const activePage = ref<AppPage>('landing')
 const isAdminPortal = ref(window.location.pathname.replace(/\/+$/, '') === '/admin')
 const adminSection = ref<AdminSection>('content')
 const currentSlide = ref(0)
+const announcementTouchStartX = ref<number | null>(null)
 const installPrompt = ref<InstallPromptEvent | null>(null)
 const installMessage = ref('')
 const isAndroidDevice = /android/i.test(navigator.userAgent)
@@ -562,6 +563,34 @@ async function loadLandingEvents() {
   }
 }
 
+function showAnnouncement(index: number) {
+  if (!landingSlides.value.length) return
+  currentSlide.value = (index + landingSlides.value.length) % landingSlides.value.length
+}
+
+function nextAnnouncement() {
+  showAnnouncement(currentSlide.value + 1)
+}
+
+function previousAnnouncement() {
+  showAnnouncement(currentSlide.value - 1)
+}
+
+function startAnnouncementSwipe(event: TouchEvent) {
+  announcementTouchStartX.value = event.changedTouches[0]?.clientX ?? null
+}
+
+function finishAnnouncementSwipe(event: TouchEvent) {
+  if (announcementTouchStartX.value === null) return
+  const endX = event.changedTouches[0]?.clientX
+  if (typeof endX !== 'number') return
+  const distance = endX - announcementTouchStartX.value
+  announcementTouchStartX.value = null
+  if (Math.abs(distance) < 45) return
+  distance < 0 ? nextAnnouncement() : previousAnnouncement()
+}
+
+
 function saveTrendingWatchlist() {
   localStorage.setItem(trendingWatchlistStorageKey, JSON.stringify(savedTrendingCoins.value))
 }
@@ -770,6 +799,12 @@ function goToScanner() {
 
 function openTaskCenter() {
   activePage.value = 'tasks'
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function openPromotions() {
+  activePage.value = 'promote'
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 function openAccountLogin() {
@@ -945,6 +980,11 @@ async function installMemeScopeApp() {
     return
   }
 
+  if (!isIosDevice) {
+    downloadAndroidApp()
+    return
+  }
+
   if (!installPrompt.value) {
     installMessage.value = isIosDevice
       ? 'In Safari, tap Share, then choose “Add to Home Screen.”'
@@ -966,6 +1006,16 @@ async function installMemeScopeApp() {
     console.error('Cobra MemeScope install prompt failed:', error)
     installMessage.value = 'The install prompt could not open. Use Chrome’s ⋮ menu and choose “Install app.”'
   }
+}
+
+function downloadAndroidApp() {
+  const link = document.createElement('a')
+  link.href = '/downloads/Cobra-MemeScope.apk'
+  link.download = 'Cobra-MemeScope.apk'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  installMessage.value = 'Android download started. Open the APK, allow installation from your browser if prompted, then launch Cobra MemeScope.'
 }
 
 onMounted(() => {
@@ -1114,7 +1164,7 @@ onUnmounted(() => {
         <button type="button" :class="{ selected: activePage === 'markets' }" :aria-current="activePage === 'markets' ? 'page' : undefined" @click="activePage = 'markets'">market tape<i>↗</i></button>
         <button type="button" :class="{ selected: activePage === 'watchlist' }" :aria-current="activePage === 'watchlist' ? 'page' : undefined" @click="activePage = 'watchlist'">watchlist<i class="nav-watchlist-icon"><span aria-hidden="true">☆</span><small>{{ (favorites.length + savedTrendingCoins.length).toString().padStart(2, '0') }}</small></i></button>
         <button type="button" :class="{ selected: activePage === 'tasks' }" :aria-current="activePage === 'tasks' ? 'page' : undefined" @click="openTaskCenter">tasks<i>+</i></button>
-        <button type="button" :class="{ selected: activePage === 'promote' }" :aria-current="activePage === 'promote' ? 'page' : undefined" @click="activePage = 'promote'">promote<i>↗</i></button>
+        <button type="button" :class="{ selected: activePage === 'promote' }" :aria-current="activePage === 'promote' ? 'page' : undefined" @click="openPromotions">promote<i>↗</i></button>
       </nav>
       <div class="scanner-nav-label chain-label">SUPPORTED CHAINS</div>
       <div class="chain-list">
@@ -1176,7 +1226,15 @@ onUnmounted(() => {
               <h2 id="landing-announcements-title">Announcements<span>.</span></h2>
             </div>
           </header>
-          <div v-if="currentAnnouncement" class="announcement-carousel" aria-roledescription="carousel" aria-label="Cobra MemeScope announcements">
+          <div
+            v-if="currentAnnouncement"
+            class="announcement-carousel"
+            aria-roledescription="carousel"
+            aria-label="Cobra MemeScope announcements"
+            @touchstart.passive="startAnnouncementSwipe"
+            @touchend.passive="finishAnnouncementSwipe"
+            @touchcancel="announcementTouchStartX = null"
+          >
             <article :key="currentAnnouncement.id" class="landing-announcement-slide" aria-live="polite">
               <img v-if="currentAnnouncement.imageUrl" class="announcement-slide-image" :src="currentAnnouncement.imageUrl" :alt="`${currentAnnouncement.title} announcement`" />
               <div v-else class="announcement-slide-art" aria-hidden="true"><span>MS</span><i></i><b></b></div>
@@ -1201,6 +1259,17 @@ onUnmounted(() => {
               </div>
               <span class="landing-announcement-number">{{ String((currentSlide % landingSlides.length) + 1).padStart(2, '0') }}</span>
             </article>
+            <div v-if="landingSlides.length > 1" class="announcement-pagination" aria-label="Choose announcement">
+              <button
+                v-for="(_, index) in landingSlides"
+                :key="index"
+                type="button"
+                :class="{ active: index === currentSlide % landingSlides.length }"
+                :aria-label="`Show announcement ${index + 1}`"
+                :aria-current="index === currentSlide % landingSlides.length ? 'true' : undefined"
+                @click="showAnnouncement(index)"
+              ></button>
+            </div>
           </div>
           <p v-else class="announcement-empty">New announcements will appear here soon.</p>
           <p class="announcement-caption">Events, product news, and community updates from Cobra MemeScope.</p>
@@ -1305,22 +1374,19 @@ onUnmounted(() => {
           <div class="mobile-install-copy">
             <div class="scan-eyebrow"><span></span> COBRA MEMESCOPE ON MOBILE</div>
             <h2 id="mobile-install-title">Your risk desk, in your pocket.</h2>
-            <p>Install Cobra MemeScope on your phone for quick access from your home screen. No app-store download is needed.</p>
+            <p>Download the Android app or add Cobra MemeScope to your iPhone home screen.</p>
             <button type="button" class="mobile-install-button" :disabled="isPwaInstalled" @click="installMemeScopeApp">
               {{ isPwaInstalled ? 'COBRA MEMESCOPE IS INSTALLED' : 'INSTALL COBRA MEMESCOPE' }}
               <span aria-hidden="true">{{ isPwaInstalled ? '✓' : '↓' }}</span>
             </button>
             <p v-if="installMessage" class="mobile-install-message" role="status">{{ installMessage }}</p>
           </div>
-          <div class="mobile-install-art" aria-hidden="true">
-            <div class="mobile-install-orbit"></div>
-            <div class="mobile-install-phone">
-              <span class="mobile-install-phone-top"></span>
-              <img class="mobile-install-phone-mark" src="/icons/cobra-192.png" alt="" />
-              <strong>COBRA MEMESCOPE</strong>
-              <small>ON-CHAIN RISK DESK</small>
-              <span class="mobile-install-phone-signal"></span>
-            </div>
+          <div class="mobile-install-art">
+            <img
+              class="mobile-install-phone-animation"
+              src="/phone-animation.png"
+              alt="Cobra MemeScope phone preview"
+            />
           </div>
         </section>
       </section>
@@ -2294,6 +2360,32 @@ onUnmounted(() => {
   overflow: hidden;
   border: 1px solid rgba(160, 177, 181, 0.25);
   background: #081b21;
+  touch-action: pan-y;
+}
+
+.announcement-pagination {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  padding: 12px;
+  background: rgba(4, 14, 18, 0.96);
+}
+
+.announcement-pagination button {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 1px solid rgba(172, 215, 193, 0.7);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+
+.announcement-pagination button.active {
+  width: 24px;
+  background: #7df4b3;
 }
 
 .landing-announcement-slide {
@@ -2539,25 +2631,19 @@ onUnmounted(() => {
   box-shadow: 0 0 50px rgba(122, 247, 179, 0.08), inset 0 0 40px rgba(122, 247, 179, 0.06);
 }
 
-.mobile-install-phone {
-  position: relative;
-  display: flex;
-  width: 144px;
-  min-height: 208px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  border: 2px solid #6d8885;
-  border-radius: 22px;
-  background: linear-gradient(155deg, #07191d, #102b2b);
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35), inset 0 0 0 4px #07191d;
-  transform: rotate(5deg);
+.mobile-install-phone-animation {
+  width: 100%;
+  max-width: 430px;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.35));
 }
 
 .mobile-install-phone-top {
   position: absolute;
   top: 10px;
+  z-index: 2;
   width: 42px;
   height: 4px;
   border-radius: 9px;
@@ -3019,8 +3105,9 @@ onUnmounted(() => {
 
   .announcement-slide-image,
   .announcement-slide-art {
-    min-height: 190px;
-    max-height: 220px;
+    aspect-ratio: 16 / 10;
+    min-height: 0;
+    max-height: none;
   }
 
   .announcement-slide-art::before {
@@ -3062,30 +3149,37 @@ onUnmounted(() => {
   .mobile-install-card {
     min-height: 0;
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-    padding: 22px 18px;
+    gap: 18px;
+    padding: 24px 18px 26px;
   }
 
   .mobile-install-copy h2 {
-    font-size: 2rem;
+    max-width: 12ch;
+    font-size: clamp(2rem, 10vw, 2.35rem);
+    line-height: 1.02;
   }
 
   .mobile-install-copy > p:not(.mobile-install-message) {
-    font-size: 0.98rem;
+    font-size: 0.96rem;
+  }
+
+  .mobile-install-button {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 54px;
   }
 
   .mobile-install-art {
-    min-height: 170px;
+    min-height: 220px;
   }
 
-  .mobile-install-phone {
-    width: 116px;
-    min-height: 162px;
-    border-radius: 18px;
+  .mobile-install-phone-animation {
+    height: auto;
+    max-width: 100%;
   }
 
   .mobile-install-orbit {
-    width: 160px;
+    width: 190px;
   }
 
   .landing-intro {
@@ -3312,6 +3406,7 @@ button:disabled { opacity: .55; cursor: not-allowed; transform: none !important;
   .task-mission-row { grid-template-columns: 42px 1fr; }
   .task-mission-row > span { grid-column: 2; text-align: left; }
   .task-mission-row button { grid-column: 2; }
+  .task-proof-form { grid-column: 1 / -1; }
 }
 
 .banned-access-slash {

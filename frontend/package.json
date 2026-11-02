@@ -12,12 +12,15 @@
     "android:sync": "node scripts/validate-android-config.js && npm run type-check && npm run build-only -- --mode android && cap sync android",
     "android:open": "cap open android",
     "android:run": "npm run android:sync && cap run android",
-    "android:build": "npm run android:sync && cd android && gradlew assembleDebug"
+    "android:build": "npm run android:sync && cd android && gradlew assembleDebug",
+    "ios:sync": "npm run type-check && npm run build-only && cap sync ios",
+    "ios:open": "cap open ios"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "8.5.3",
     "@lucide/vue": "^1.57.0",
     "@solana/web3.js": "^1.99.0",
     "bs58": "^6.0.0",
