@@ -1078,7 +1078,7 @@ body { min-width: 0; background: var(--desk-paper); color: var(--desk-ink); }
     z-index: 1000 !important;
     width: 100% !important;
     min-height: calc(70px + env(safe-area-inset-bottom));
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     margin: 0;
     padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
